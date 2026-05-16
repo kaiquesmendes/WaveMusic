@@ -2,19 +2,25 @@
 
 import { Musica } from '@/types'
 import { MusicCard } from './MusicCard'
-import { MusicCardSkeleton } from '@/components/UI/Skeleton'
+import { Skeleton } from '@/components/UI/Skeleton'
 
 interface MusicGridProps {
   musicas: Musica[]
   loading?: boolean
+  variant?: 'default' | 'featured'
 }
 
-export function MusicGrid({ musicas, loading = false }: MusicGridProps) {
+export function MusicGrid({ musicas, loading = false, variant = 'default' }: MusicGridProps) {
   if (loading) {
+    const skeletonCount = variant === 'featured' ? 3 : 12
     return (
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-6">
-        {[...Array(12)].map((_, i) => (
-          <MusicCardSkeleton key={i} />
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
+        {[...Array(skeletonCount)].map((_, i) => (
+          <div key={i} className="animate-pulse">
+            <div className="bg-white/10 aspect-square rounded-xl mb-3" />
+            <div className="h-4 bg-white/10 rounded w-3/4 mb-2" />
+            <div className="h-3 bg-white/10 rounded w-1/2" />
+          </div>
         ))}
       </div>
     )
@@ -23,15 +29,20 @@ export function MusicGrid({ musicas, loading = false }: MusicGridProps) {
   if (musicas.length === 0) {
     return (
       <div className="text-center py-12">
+        <div className="text-6xl mb-4">🎵</div>
         <p className="text-gray-400">Nenhuma música encontrada</p>
       </div>
     )
   }
 
+  const gridClasses = variant === 'featured'
+    ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'
+    : 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6'
+
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-6">
+    <div className={gridClasses}>
       {musicas.map((music) => (
-        <MusicCard key={music.id} music={music} />
+        <MusicCard key={music.id} music={music} variant={variant === 'featured' ? 'featured' : 'default'} />
       ))}
     </div>
   )
