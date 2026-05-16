@@ -5,7 +5,7 @@ import { MusicGrid } from '@/components/Music/MusicGrid'
 import { supabase } from '@/lib/supabase/client'
 import { Musica } from '@/types'
 import { usePlayerStore } from '@/store/playerStore'
-import { Play, TrendingUp, Clock, Heart, Sparkles, Headphones, Calendar, Flame, Star, RefreshCw, Trophy } from 'lucide-react'
+import { Play, TrendingUp, Clock, Heart, Sparkles, Headphones, Calendar, Flame, Star, RefreshCw, Trophy, Radio } from 'lucide-react'
 import { useAuth } from '@/lib/hooks/useAuth'
 import Image from 'next/image'
 
@@ -17,7 +17,7 @@ export default function HomePage() {
   const [favorites, setFavorites] = useState<Musica[]>([])
   const [loading, setLoading] = useState(true)
   const [currentFeaturedIndex, setCurrentFeaturedIndex] = useState(0)
-  const { setCurrentSong } = usePlayerStore()
+  const { setCurrentSong, toggleGlobalShuffle, playRandomSong, isGlobalShuffle } = usePlayerStore()
   const { user } = useAuth()
 
   // Carregar dados
@@ -150,6 +150,16 @@ export default function HomePage() {
     fetchAllData()
   }
 
+  const handleGlobalShuffle = async () => {
+    if (!isGlobalShuffle) {
+      // Ativar modo aleatório global e tocar uma música aleatória
+      await toggleGlobalShuffle()
+      await playRandomSong()
+    } else {
+      toggleGlobalShuffle()
+    }
+  }
+
   const currentFeatured = featuredSongs[currentFeaturedIndex]
 
   return (
@@ -198,7 +208,7 @@ export default function HomePage() {
                 {currentFeatured.artista}
               </p>
               
-              <div className="flex gap-3">
+              <div className="flex flex-wrap gap-3">
                 <button
                   onClick={() => setCurrentSong(currentFeatured, featuredSongs)}
                   className="bg-white text-black px-6 py-2.5 rounded-full font-semibold hover:scale-105 transition-transform flex items-center gap-2 shadow-xl"
@@ -207,8 +217,20 @@ export default function HomePage() {
                   Ouvir Agora
                 </button>
                 
+                <button
+                  onClick={handleGlobalShuffle}
+                  className={`px-6 py-2.5 rounded-full font-semibold hover:scale-105 transition-transform flex items-center gap-2 shadow-xl ${
+                    isGlobalShuffle
+                      ? 'bg-purple-500 text-white'
+                      : 'bg-white/10 backdrop-blur-sm text-white hover:bg-white/20'
+                  }`}
+                >
+                  <Radio size={18} />
+                  {isGlobalShuffle ? 'Modo Aleatório Ativo' : 'Modo Aleatório'}
+                </button>
+                
                 {featuredSongs.length > 1 && (
-                  <div className="flex gap-1">
+                  <div className="flex gap-1 items-center ml-2">
                     {featuredSongs.map((_, idx) => (
                       <button
                         key={idx}
@@ -274,14 +296,26 @@ export default function HomePage() {
               {user ? 'Recomendadas para Você' : 'Músicas em Alta'}
             </h2>
           </div>
-          <button 
-            onClick={handleRefreshRecommendations}
-            className="flex items-center gap-1 text-sm text-gray-400 hover:text-purple-400 transition-colors group"
-            title="Atualizar recomendações"
-          >
-            <RefreshCw size={14} className="group-hover:rotate-180 transition-transform duration-500" />
-            <span>Atualizar</span>
-          </button>
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={handleGlobalShuffle}
+              className={`flex items-center gap-1 text-sm transition-colors group ${
+                isGlobalShuffle ? 'text-purple-400' : 'text-gray-400 hover:text-purple-400'
+              }`}
+              title="Modo aleatório global"
+            >
+              <Radio size={14} className="group-hover:scale-110 transition-transform" />
+              <span>Rádio</span>
+            </button>
+            <button 
+              onClick={handleRefreshRecommendations}
+              className="flex items-center gap-1 text-sm text-gray-400 hover:text-purple-400 transition-colors group"
+              title="Atualizar recomendações"
+            >
+              <RefreshCw size={14} className="group-hover:rotate-180 transition-transform duration-500" />
+              <span>Atualizar</span>
+            </button>
+          </div>
         </div>
         
         {recommendations.length > 0 ? (
@@ -322,12 +356,25 @@ export default function HomePage() {
         <p className="text-gray-400 mb-4 max-w-md mx-auto">
           Explore nossa biblioteca e encontre suas próximas músicas favoritas
         </p>
-        <button 
-          onClick={() => window.location.href = '/explore'}
-          className="bg-gradient-to-r from-purple-500 to-pink-500 px-6 py-2.5 rounded-full font-semibold hover:scale-105 transition-transform inline-flex items-center gap-2 shadow-lg"
-        >
-          Explorar Agora
-        </button>
+        <div className="flex flex-wrap gap-3 justify-center">
+          <button 
+            onClick={() => window.location.href = '/explore'}
+            className="bg-gradient-to-r from-purple-500 to-pink-500 px-6 py-2.5 rounded-full font-semibold hover:scale-105 transition-transform inline-flex items-center gap-2 shadow-lg"
+          >
+            Explorar Agora
+          </button>
+          <button 
+            onClick={handleGlobalShuffle}
+            className={`px-6 py-2.5 rounded-full font-semibold hover:scale-105 transition-transform inline-flex items-center gap-2 shadow-lg ${
+              isGlobalShuffle
+                ? 'bg-purple-500 text-white'
+                : 'bg-white/10 backdrop-blur-sm text-white hover:bg-white/20'
+            }`}
+          >
+            <Radio size={18} />
+            {isGlobalShuffle ? 'Modo Aleatório Ativo' : 'Ouvir em Modo Aleatório'}
+          </button>
+        </div>
       </div>
     </div>
   )
