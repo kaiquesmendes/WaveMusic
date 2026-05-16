@@ -40,27 +40,22 @@ export default function LibraryPage() {
 
     if (playlistsData) setPlaylists(playlistsData)
 
-    // Fetch favorites - usando o mesmo método do favorites
+    // Fetch favorites usando o mesmo método do favorites
     const { data: favoritosData } = await supabase
       .from('favoritos')
-      .select('musica_id')
+      .select(`
+        musica_id,
+        musicas:musica_id (*)
+      `)
       .eq('usuario_id', user.id)
       .order('created_at', { ascending: false })
       .limit(5)
 
     if (favoritosData && favoritosData.length > 0) {
-      const musicasIds = favoritosData.map(f => f.musica_id)
-      const { data: musicasData } = await supabase
-        .from('musicas')
-        .select('*')
-        .in('id', musicasIds)
-      
-      if (musicasData) {
-        const orderedMusicas = favoritosData
-          .map(fav => musicasData.find(m => m.id === fav.musica_id))
-          .filter((m): m is Musica => m !== undefined)
-        setFavorites(orderedMusicas)
-      }
+      const musicasList = favoritosData
+        .map(item => (item as any).musicas)
+        .filter((m): m is Musica => m !== null)
+      setFavorites(musicasList)
     }
     
     setLoading(false)

@@ -7,10 +7,6 @@ import { useAuth } from '@/lib/hooks/useAuth'
 import { Musica } from '@/types'
 import { Heart } from 'lucide-react'
 
-interface FavoritoResponse {
-  musica: Musica
-}
-
 export default function FavoritesPage() {
   const { user } = useAuth()
   const [favorites, setFavorites] = useState<Musica[]>([])
@@ -33,45 +29,30 @@ export default function FavoritesPage() {
     setLoading(true)
     
     try {
-      // Primeiro, buscar os IDs das músicas favoritas
-      const { data: favoritosData, error: favoritosError } = await supabase
+      // Buscar diretamente as músicas favoritas com join
+      const { data, error } = await supabase
         .from('favoritos')
-        .select('musica_id')
+        .select(`
+          musica_id,
+          musicas:musica_id (*)
+        `)
         .eq('usuario_id', user.id)
         .order('created_at', { ascending: false })
 
-      if (favoritosError) {
-        console.error('Erro ao buscar favoritos:', favoritosError)
+      if (error) {
+        console.error('Erro ao buscar favoritos:', error)
         setLoading(false)
         return
       }
 
-      if (!favoritosData || favoritosData.length === 0) {
+      if (data && data.length > 0) {
+        // Extrair as músicas dos dados retornados
+        const musicasList = data
+          .map(item => (item as any).musicas)
+          .filter((m): m is Musica => m !== null)
+        setFavorites(musicasList)
+      } else {
         setFavorites([])
-        setLoading(false)
-        return
-      }
-
-      // Buscar os detalhes das músicas
-      const musicasIds = favoritosData.map(f => f.musica_id)
-      
-      const { data: musicasData, error: musicasError } = await supabase
-        .from('musicas')
-        .select('*')
-        .in('id', musicasIds)
-
-      if (musicasError) {
-        console.error('Erro ao buscar detalhes das músicas:', musicasError)
-        setLoading(false)
-        return
-      }
-
-      if (musicasData) {
-        // Manter a ordem correta
-        const orderedMusicas = favoritosData
-          .map(fav => musicasData.find(m => m.id === fav.musica_id))
-          .filter((m): m is Musica => m !== undefined)
-        setFavorites(orderedMusicas)
       }
     } catch (error) {
       console.error('Erro inesperado:', error)
