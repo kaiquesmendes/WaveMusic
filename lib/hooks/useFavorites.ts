@@ -12,17 +12,36 @@ export function useFavorites() {
   useEffect(() => {
     if (user) {
       fetchFavorites()
+    } else {
+      setLoading(false)
     }
   }, [user])
 
   async function fetchFavorites() {
-    const { data } = await supabase
+    if (!user?.id) {
+      setLoading(false)
+      return
+    }
+
+    // Usar any para evitar erro de tipo
+    const supabaseAny = supabase as any
+    
+    const { data, error } = await supabaseAny
       .from('favoritos')
       .select('musica_id')
-      .eq('usuario_id', user?.id)
+      .eq('usuario_id', user.id)
+
+    if (error) {
+      console.error('Erro ao buscar favoritos:', error)
+      setLoading(false)
+      return
+    }
     
-    if (data) {
-      setFavorites(data.map(f => f.musica_id))
+    if (data && data.length > 0) {
+      const musicasIds = data.map((f: any) => f.musica_id)
+      setFavorites(musicasIds)
+    } else {
+      setFavorites([])
     }
     setLoading(false)
   }
@@ -32,20 +51,27 @@ export function useFavorites() {
 
     const isFavorite = favorites.includes(musicaId)
     
+    // Usar any para evitar erro de tipo
+    const supabaseAny = supabase as any
+    
     if (isFavorite) {
-      await supabase
+      const { error } = await supabaseAny
         .from('favoritos')
         .delete()
         .eq('usuario_id', user.id)
         .eq('musica_id', musicaId)
       
-      setFavorites(prev => prev.filter(id => id !== musicaId))
+      if (!error) {
+        setFavorites(prev => prev.filter(id => id !== musicaId))
+      }
     } else {
-      await supabase
+      const { error } = await supabaseAny
         .from('favoritos')
         .insert({ usuario_id: user.id, musica_id: musicaId })
       
-      setFavorites(prev => [...prev, musicaId])
+      if (!error) {
+        setFavorites(prev => [...prev, musicaId])
+      }
     }
   }
 
