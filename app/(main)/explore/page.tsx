@@ -20,15 +20,29 @@ export default function ExplorePage() {
   }, [])
 
   async function fetchMusicas() {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('musicas')
       .select('*')
       .order('created_at', { ascending: false })
     
+    if (error) {
+      console.error('Erro ao buscar músicas:', error)
+      setLoading(false)
+      return
+    }
+
     if (data) {
-      setMusicas(data)
-      setFilteredMusicas(data)
-      const uniqueGeneros = [...new Set(data.map(m => m.genero).filter(Boolean))] as string[]
+      // Garantir que data é do tipo Musica[]
+      const musicasData = data as Musica[]
+      setMusicas(musicasData)
+      setFilteredMusicas(musicasData)
+      
+      // Extrair gêneros únicos (com segurança)
+      const uniqueGeneros = [...new Set(
+        musicasData
+          .map(m => m.genero)
+          .filter((genero): genero is string => Boolean(genero))
+      )]
       setGeneros(uniqueGeneros)
     }
     setLoading(false)
