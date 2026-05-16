@@ -1,7 +1,9 @@
+// types/index.ts
 export interface Usuario {
   id: string
   email: string
   nome: string
+  bio: string | null
   avatar_url: string | null
   created_at: string
   updated_at: string
