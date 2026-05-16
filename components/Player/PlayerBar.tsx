@@ -8,17 +8,68 @@ import { formatTime } from '@/lib/utils/formatTime'
 import Image from 'next/image'
 import { Heart } from 'lucide-react'
 import { useFavorites } from '@/lib/hooks/useFavorites'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
+import { supabase } from '@/lib/supabase/client'
+import { useAuth } from '@/lib/hooks/useAuth'
 
 export function PlayerBar() {
   const { currentSong, duration, currentTime, isPlaying } = usePlayerStore()
   const { favorites, toggleFavorite } = useFavorites()
+  const { user } = useAuth()
+  const hasSavedRef = useRef<string>('')
+  const saveTimeoutRef = useRef<NodeJS.Timeout>()
 
-  // Adiciona suporte para lock screen (NÃO QUEBRA NADA NO PC)
+  // SALVAR NO HISTÓRICO - Quando a música começa a tocar
+  useEffect(() => {
+    // Limpar timeout anterior
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+    }
+
+    if (!currentSong || !user || !isPlaying) return
+    
+    // Evitar salvar múltiplas vezes para a mesma música
+    if (hasSavedRef.current === currentSong.id) return
+    
+    // Salvar após 10 segundos de reprodução (para não contar cliques acidentais)
+    saveTimeoutRef.current = setTimeout(async () => {
+      if (isPlaying && currentSong && user && hasSavedRef.current !== currentSong.id) {
+        try {
+          const supabaseAny = supabase as any
+          const { error } = await supabaseAny
+            .from('historico')
+            .insert({
+              usuario_id: user.id,
+              musica_id: currentSong.id,
+              played_at: new Date().toISOString()
+            })
+          
+          if (!error) {
+            hasSavedRef.current = currentSong.id
+            console.log('✅ Salvo no histórico:', currentSong.titulo)
+          }
+        } catch (error) {
+          console.error('Erro ao salvar no histórico:', error)
+        }
+      }
+    }, 10000) // 10 segundos
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+  }, [currentSong, isPlaying, user])
+
+  // Resetar o saved ref quando a música muda
+  useEffect(() => {
+    hasSavedRef.current = ''
+  }, [currentSong?.id])
+
+  // Media Session API para lock screen
   useEffect(() => {
     if (!currentSong) return
 
-    // Verifica se o navegador suporta (PCs modernos também suportam)
     if ('mediaSession' in navigator) {
       try {
         navigator.mediaSession.metadata = new MediaMetadata({
