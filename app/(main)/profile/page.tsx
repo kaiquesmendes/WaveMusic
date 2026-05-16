@@ -22,7 +22,10 @@ import {
   Trophy,
   Mic2,
   Disc3,
-  Star
+  Star,
+  Activity,
+  TrendingUp,
+  Award
 } from 'lucide-react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
@@ -31,6 +34,7 @@ export default function ProfilePage() {
   const { user, userData, refreshUser } = useAuth()
   const [isEditing, setIsEditing] = useState(false)
   const [nome, setNome] = useState('')
+  const [bio, setBio] = useState('')
   const [avatarUrl, setAvatarUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -40,9 +44,13 @@ export default function ProfilePage() {
     history: 0,
     totalMinutes: 0,
     totalHours: 0,
+    totalSongs: 0,
     topGenre: '',
+    topGenreCount: 0,
     favoriteArtist: '',
-    listeningLevel: ''
+    favoriteArtistCount: 0,
+    listeningLevel: '',
+    levelProgress: 0
   })
   const [recentActivities, setRecentActivities] = useState<any[]>([])
   const [topMusics, setTopMusics] = useState<any[]>([])
@@ -52,6 +60,7 @@ export default function ProfilePage() {
   useEffect(() => {
     if (userData) {
       setNome(userData.nome || '')
+      setBio(userData.bio || '')
       setAvatarUrl(userData.avatar_url || '')
     }
     if (user) {
@@ -64,42 +73,74 @@ export default function ProfilePage() {
   async function fetchStats() {
     if (!user) return
 
+    const supabaseAny = supabase as any
+
     const [playlistsCount, favoritesCount, historyCount] = await Promise.all([
-      supabase.from('playlists').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
-      supabase.from('favoritos').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
-      supabase.from('historico').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
+      supabaseAny.from('playlists').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
+      supabaseAny.from('favoritos').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
+      supabaseAny.from('historico').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
     ])
 
-    const { data: historyData } = await supabase
+    // Buscar histórico com detalhes das músicas
+    const { data: historyData } = await supabaseAny
       .from('historico')
       .select(`
         musica:musica_id (*)
       `)
       .eq('usuario_id', user.id)
-      .limit(200)
+      .limit(500)
 
-    const musicas = historyData?.map(item => (item as any).musica).filter(Boolean) || []
+    const musicas = historyData?.map((item: any) => item.musica).filter(Boolean) || []
     
+    // Calcular tempo total
     const totalSeconds = musicas.reduce((acc: number, m: any) => acc + (m.duracao || 0), 0)
     const totalMinutes = Math.floor(totalSeconds / 60)
     const totalHours = Math.floor(totalMinutes / 60)
-    
+    const totalSongs = musicas.length
+
+    // Contar gêneros
     const genreCount: Record<string, number> = {}
     const artistCount: Record<string, number> = {}
+    
     musicas.forEach((m: any) => {
-      if (m.genero) genreCount[m.genero] = (genreCount[m.genero] || 0) + 1
-      if (m.artista) artistCount[m.artista] = (artistCount[m.artista] || 0) + 1
+      if (m.genero && m.genero !== 'null' && m.genero !== '') {
+        genreCount[m.genero] = (genreCount[m.genero] || 0) + 1
+      }
+      if (m.artista && m.artista !== 'null' && m.artista !== '') {
+        artistCount[m.artista] = (artistCount[m.artista] || 0) + 1
+      }
     })
     
-    const topGenre = Object.entries(genreCount).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Ainda não definido'
-    const favoriteArtist = Object.entries(artistCount).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Ainda não definido'
+    // Encontrar top gênero e artista
+    const topGenreEntry = Object.entries(genreCount).sort((a, b) => b[1] - a[1])[0]
+    const topArtistEntry = Object.entries(artistCount).sort((a, b) => b[1] - a[1])[0]
     
+    const topGenre = topGenreEntry?.[0] || 'Nenhum ainda'
+    const topGenreCount = topGenreEntry?.[1] || 0
+    const favoriteArtist = topArtistEntry?.[0] || 'Nenhum ainda'
+    const favoriteArtistCount = topArtistEntry?.[1] || 0
+    
+    // Calcular nível
     let listeningLevel = 'Iniciante'
-    if (totalHours >= 100) listeningLevel = 'Lendário 🏆'
-    else if (totalHours >= 50) listeningLevel = 'Expert 🎖️'
-    else if (totalHours >= 20) listeningLevel = 'Avançado 🌟'
-    else if (totalHours >= 5) listeningLevel = 'Intermediário 🎵'
-    else if (totalHours >= 1) listeningLevel = 'Aprendiz 🎧'
+    let levelProgress = 0
+    if (totalHours >= 100) {
+      listeningLevel = 'Lendário 🏆'
+      levelProgress = 100
+    } else if (totalHours >= 50) {
+      listeningLevel = 'Expert 🎖️'
+      levelProgress = ((totalHours - 50) / 50) * 100
+    } else if (totalHours >= 20) {
+      listeningLevel = 'Avançado 🌟'
+      levelProgress = ((totalHours - 20) / 30) * 100
+    } else if (totalHours >= 5) {
+      listeningLevel = 'Intermediário 🎵'
+      levelProgress = ((totalHours - 5) / 15) * 100
+    } else if (totalHours >= 1) {
+      listeningLevel = 'Aprendiz 🎧'
+      levelProgress = (totalHours / 1) * 100
+    } else {
+      levelProgress = totalSongs > 0 ? 10 : 0
+    }
 
     setStats({
       playlists: playlistsCount.count || 0,
@@ -107,16 +148,22 @@ export default function ProfilePage() {
       history: historyCount.count || 0,
       totalMinutes,
       totalHours,
+      totalSongs,
       topGenre,
+      topGenreCount,
       favoriteArtist,
-      listeningLevel
+      favoriteArtistCount,
+      listeningLevel,
+      levelProgress: Math.min(levelProgress, 100)
     })
   }
 
   async function fetchRecentActivity() {
     if (!user) return
 
-    const { data } = await supabase
+    const supabaseAny = supabase as any
+    
+    const { data } = await supabaseAny
       .from('historico')
       .select(`
         musica:musica_id (*),
@@ -124,16 +171,16 @@ export default function ProfilePage() {
       `)
       .eq('usuario_id', user.id)
       .order('played_at', { ascending: false })
-      .limit(6)
+      .limit(10)
 
     if (data && data.length > 0) {
       const activities = []
       for (const item of data) {
-        const musicaData = (item as any).musica
+        const musicaData = item.musica
         if (musicaData) {
           activities.push({
             musica: musicaData,
-            played_at: (item as any).played_at
+            played_at: item.played_at
           })
         }
       }
@@ -144,18 +191,20 @@ export default function ProfilePage() {
   async function fetchTopMusics() {
     if (!user) return
 
-    const { data } = await supabase
+    const supabaseAny = supabase as any
+    
+    const { data } = await supabaseAny
       .from('historico')
       .select(`
         musica:musica_id (*)
       `)
       .eq('usuario_id', user.id)
-      .limit(100)
+      .limit(200)
 
     if (data && data.length > 0) {
       const musicCount: Record<string, any> = {}
       for (const item of data) {
-        const musica = (item as any).musica
+        const musica = item.musica
         if (musica && musica.id) {
           if (!musicCount[musica.id]) {
             musicCount[musica.id] = { ...musica, count: 0 }
@@ -163,8 +212,8 @@ export default function ProfilePage() {
           musicCount[musica.id].count++
         }
       }
-      const top3 = Object.values(musicCount).sort((a: any, b: any) => b.count - a.count).slice(0, 3)
-      setTopMusics(top3)
+      const top5 = Object.values(musicCount).sort((a: any, b: any) => b.count - a.count).slice(0, 5)
+      setTopMusics(top5)
     }
   }
 
@@ -177,7 +226,9 @@ export default function ProfilePage() {
     const fileName = `${user.id}-${Date.now()}.${fileExt}`
     const filePath = `avatars/${fileName}`
 
-    const { error: uploadError } = await supabase.storage
+    const supabaseAny = supabase as any
+
+    const { error: uploadError } = await supabaseAny.storage
       .from('avatars')
       .upload(filePath, file)
 
@@ -187,12 +238,10 @@ export default function ProfilePage() {
       return
     }
 
-    const { data: { publicUrl } } = supabase.storage
+    const { data: { publicUrl } } = supabaseAny.storage
       .from('avatars')
       .getPublicUrl(filePath)
 
-    // Versão corrigida - usando any no supabase
-    const supabaseAny = supabase as any
     const { error: updateError } = await supabaseAny
       .from('usuarios')
       .update({ avatar_url: publicUrl })
@@ -209,12 +258,13 @@ export default function ProfilePage() {
     if (!user) return
     setLoading(true)
 
-    // Versão corrigida - usando any no supabase
     const supabaseAny = supabase as any
+    
     const { error } = await supabaseAny
       .from('usuarios')
       .update({ 
         nome, 
+        bio,
         avatar_url: avatarUrl, 
         updated_at: new Date().toISOString() 
       })
@@ -234,31 +284,30 @@ export default function ProfilePage() {
 
   const getLevelColor = () => {
     const level = stats.listeningLevel
-    if (level.includes('Lendário')) return 'text-yellow-400'
-    if (level.includes('Expert')) return 'text-purple-400'
-    if (level.includes('Avançado')) return 'text-blue-400'
-    if (level.includes('Intermediário')) return 'text-green-400'
-    return 'text-gray-400'
+    if (level.includes('Lendário')) return 'from-yellow-400 to-orange-500'
+    if (level.includes('Expert')) return 'from-purple-400 to-pink-500'
+    if (level.includes('Avançado')) return 'from-blue-400 to-cyan-500'
+    if (level.includes('Intermediário')) return 'from-green-400 to-emerald-500'
+    return 'from-gray-400 to-gray-500'
   }
 
   return (
     <div className="min-h-screen pb-20 animate-fade-in">
-      {/* Hero Section Premium */}
-      <div className="relative h-80 rounded-2xl overflow-hidden mb-24 group">
-        <div className="absolute inset-0 bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 animate-gradient bg-[length:200%_200%]" />
-        <div className="absolute inset-0 bg-black/40 group-hover:bg-black/30 transition-all duration-500" />
+      {/* Hero Section com Gradiente e Avatar Central */}
+      <div className="relative h-64 md:h-80 rounded-2xl overflow-hidden mb-20 group">
+        <div className={`absolute inset-0 bg-gradient-to-r ${getLevelColor()} animate-gradient bg-[length:200%_200%]`} />
+        <div className="absolute inset-0 bg-black/30 group-hover:bg-black/20 transition-all duration-500" />
         
-        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-500">
-          <div className="text-center">
-            <Sparkles className="w-12 h-12 text-white mx-auto mb-2" />
-            <p className={`font-medium ${getLevelColor()}`}>{stats.listeningLevel}</p>
-          </div>
+        {/* Nível */}
+        <div className="absolute top-4 right-4 glass rounded-full px-4 py-2 flex items-center gap-2 z-10">
+          <Award size={16} className="text-yellow-400" />
+          <span className="text-sm font-medium text-white">{stats.listeningLevel}</span>
         </div>
         
         {/* Avatar Container */}
-        <div className="absolute -bottom-16 left-8 md:left-12">
+        <div className="absolute -bottom-16 left-1/2 transform -translate-x-1/2">
           <div className="relative group/avatar">
-            <div className="relative w-32 h-32 md:w-40 md:h-40 rounded-2xl overflow-hidden border-4 border-white shadow-2xl transition-all duration-300 group-hover/avatar:scale-105">
+            <div className="relative w-32 h-32 md:w-36 md:h-36 rounded-full overflow-hidden border-4 border-white shadow-2xl transition-all duration-300 group-hover/avatar:scale-105">
               {avatarUrl ? (
                 <Image src={avatarUrl} alt={nome} fill className="object-cover" />
               ) : (
@@ -291,122 +340,117 @@ export default function ProfilePage() {
         </div>
 
         {/* Decorative Elements */}
-        <div className="absolute top-4 right-4 opacity-10 group-hover:opacity-20 transition-opacity duration-500">
-          <Headphones size={80} />
+        <div className="absolute top-4 left-4 opacity-10 group-hover:opacity-20 transition-opacity duration-500">
+          <Headphones size={60} />
         </div>
-        <div className="absolute bottom-4 left-4 opacity-5 group-hover:opacity-10 transition-opacity duration-500">
-          <Music size={60} />
+        <div className="absolute bottom-4 right-4 opacity-10 group-hover:opacity-20 transition-opacity duration-500">
+          <Music size={50} />
         </div>
       </div>
 
       {/* Profile Content */}
-      <div className="max-w-5xl mx-auto px-4 md:px-8 space-y-8">
+      <div className="max-w-4xl mx-auto px-4 space-y-8">
         {/* Header Info */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
-          <div className="ml-36 md:ml-44">
-            {isEditing ? (
-              <input
-                type="text"
-                value={nome}
-                onChange={(e) => setNome(e.target.value)}
-                className="text-2xl md:text-3xl font-bold bg-white/10 border border-white/20 rounded-lg px-3 py-1 text-white focus:outline-none focus:border-purple-500 transition-all"
-                placeholder="Seu nome"
-              />
-            ) : (
-              <h1 className="text-2xl md:text-3xl font-bold text-white flex items-center gap-2">
-                {nome || user?.email?.split('@')[0]}
-                {stats.totalHours >= 50 && <Trophy size={20} className="text-yellow-400" />}
-              </h1>
-            )}
-            <p className="text-gray-400 text-sm mt-1 flex items-center gap-2">
-              <Shield size={14} />
-              Membro desde {new Date(user?.created_at || '').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
-            </p>
-          </div>
-
-          <div className="flex gap-3">
-            {!isEditing ? (
-              <button
-                onClick={() => setIsEditing(true)}
-                className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-5 py-2 rounded-full transition-all duration-300 hover:scale-105"
-              >
-                <Edit2 size={16} />
-                Editar Perfil
-              </button>
-            ) : (
-              <>
-                <button
-                  onClick={() => setIsEditing(false)}
-                  className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-5 py-2 rounded-full transition-all duration-300"
-                >
-                  <X size={16} />
-                  Cancelar
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={loading}
-                  className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 px-5 py-2 rounded-full hover:opacity-90 transition-all duration-300 hover:scale-105 disabled:opacity-50"
-                >
-                  <Save size={16} />
-                  {loading ? 'Salvando...' : 'Salvar'}
-                </button>
-              </>
-            )}
-          </div>
+        <div className="text-center mt-8">
+          {isEditing ? (
+            <input
+              type="text"
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              className="text-2xl md:text-3xl font-bold bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white text-center focus:outline-none focus:border-purple-500 transition-all"
+              placeholder="Seu nome"
+            />
+          ) : (
+            <h1 className="text-2xl md:text-3xl font-bold text-white flex items-center justify-center gap-2">
+              {nome || user?.email?.split('@')[0]}
+              {stats.totalHours >= 50 && <Trophy size={20} className="text-yellow-400" />}
+            </h1>
+          )}
+          <p className="text-gray-400 text-sm mt-2 flex items-center justify-center gap-2">
+            <Shield size={14} />
+            Membro desde {new Date(user?.created_at || '').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+          </p>
         </div>
 
-        {/* Stats Cards Premium */}
+        {/* Level Progress Bar */}
+        <div className="glass rounded-2xl p-6">
+          <div className="flex justify-between items-center mb-3">
+            <span className="text-sm text-gray-400">Progresso para próximo nível</span>
+            <span className="text-sm font-medium text-white">{Math.round(stats.levelProgress)}%</span>
+          </div>
+          <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-500"
+              style={{ width: `${stats.levelProgress}%` }}
+            />
+          </div>
+          <p className="text-xs text-gray-500 mt-2 text-center">
+            {stats.totalHours} horas ouvidas • {stats.totalSongs} músicas
+          </p>
+        </div>
+
+        {/* Stats Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard 
-            icon={<ListMusic size={24} />}
-            value={stats.playlists}
-            label="Playlists"
-            color="purple"
-            onClick={() => router.push('/library')}
-          />
-          <StatCard 
-            icon={<Heart size={24} />}
+            icon={<Heart size={22} />}
             value={stats.favorites}
             label="Curtidas"
             color="pink"
             onClick={() => router.push('/favorites')}
           />
           <StatCard 
-            icon={<Headphones size={24} />}
+            icon={<ListMusic size={22} />}
+            value={stats.playlists}
+            label="Playlists"
+            color="purple"
+            onClick={() => router.push('/library')}
+          />
+          <StatCard 
+            icon={<Headphones size={22} />}
             value={stats.history}
-            label="Músicas Ouvidas"
+            label="Músicas"
             color="green"
           />
           <StatCard 
-            icon={<Clock size={24} />}
+            icon={<Clock size={22} />}
             value={stats.totalHours}
-            label="Horas Ouvidas"
+            label="Horas"
             color="orange"
             suffix="h"
           />
         </div>
 
-        {/* Music Taste Section */}
+        {/* Music Taste Section - Destaque */}
         <div className="grid md:grid-cols-2 gap-6">
           <div className="glass rounded-2xl p-6 transition-all duration-300 hover:scale-[1.02] group">
-            <div className="flex items-center gap-2 mb-4">
-              <Sparkles size={20} className="text-yellow-400 group-hover:rotate-12 transition-transform" />
-              <h3 className="text-lg font-semibold text-white">Gênero Favorito</h3>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center group-hover:scale-110 transition-transform">
+                <Disc3 size={20} className="text-white" />
+              </div>
+              <div>
+                <h3 className="text-sm text-gray-400">Gênero Favorito</h3>
+                <p className="text-xl font-bold text-white">{stats.topGenre}</p>
+              </div>
             </div>
-            <div className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent flex items-center gap-2">
-              <Disc3 size={24} />
-              {stats.topGenre}
+            <div className="flex items-center gap-2 text-sm text-gray-400">
+              <TrendingUp size={14} />
+              <span>{stats.topGenreCount} músicas ouvidas neste gênero</span>
             </div>
           </div>
 
           <div className="glass rounded-2xl p-6 transition-all duration-300 hover:scale-[1.02] group">
-            <div className="flex items-center gap-2 mb-4">
-              <Star size={20} className="text-yellow-400 group-hover:rotate-12 transition-transform" />
-              <h3 className="text-lg font-semibold text-white">Artista Favorito</h3>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-r from-orange-500 to-red-500 flex items-center justify-center group-hover:scale-110 transition-transform">
+                <Mic2 size={20} className="text-white" />
+              </div>
+              <div>
+                <h3 className="text-sm text-gray-400">Artista Favorito</h3>
+                <p className="text-xl font-bold text-white">{stats.favoriteArtist}</p>
+              </div>
             </div>
-            <div className="text-2xl font-bold text-white flex items-center gap-2">
-              <Mic2 size={24} />
-              {stats.favoriteArtist}
+            <div className="flex items-center gap-2 text-sm text-gray-400">
+              <TrendingUp size={14} />
+              <span>{stats.favoriteArtistCount} músicas ouvidas</span>
             </div>
           </div>
         </div>
@@ -416,13 +460,13 @@ export default function ProfilePage() {
           <div className="glass rounded-2xl p-6">
             <div className="flex items-center gap-2 mb-6">
               <Trophy size={20} className="text-yellow-400" />
-              <h3 className="text-lg font-semibold text-white">Top 3 Músicas Mais Ouvidas</h3>
+              <h3 className="text-lg font-semibold text-white">Top 5 Músicas Mais Ouvidas</h3>
             </div>
             <div className="space-y-3">
               {topMusics.map((musica, index) => (
                 <div key={musica.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition-all group">
-                  <div className="text-2xl font-bold text-gray-500 w-8">
-                    {index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉'}
+                  <div className="text-2xl font-bold text-gray-500 w-10">
+                    {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}º`}
                   </div>
                   <div className="relative w-10 h-10 rounded-lg overflow-hidden">
                     {musica.url_capa ? (
@@ -452,17 +496,17 @@ export default function ProfilePage() {
           <div className="glass rounded-2xl p-6">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-2">
-                <Clock size={20} className="text-purple-400" />
+                <Activity size={20} className="text-purple-400" />
                 <h3 className="text-lg font-semibold text-white">Atividade Recente</h3>
               </div>
               <ChevronRight size={16} className="text-gray-500" />
             </div>
             <div className="space-y-3">
-              {recentActivities.map((activity, index) => {
+              {recentActivities.slice(0, 5).map((activity, index) => {
                 const musica = activity.musica
                 if (!musica) return null
                 return (
-                  <div key={index} className="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition-all group cursor-pointer">
+                  <div key={index} className="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition-all cursor-pointer">
                     <div className="relative w-10 h-10 rounded-lg overflow-hidden">
                       {musica.url_capa ? (
                         <Image src={musica.url_capa} alt={musica.titulo} fill className="object-cover" />
@@ -486,8 +530,29 @@ export default function ProfilePage() {
           </div>
         )}
 
+        {/* Bio Section */}
+        {isEditing ? (
+          <div className="glass rounded-2xl p-6">
+            <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
+              <Mic2 size={16} />
+              Bio
+            </label>
+            <textarea
+              value={bio}
+              onChange={(e) => setBio(e.target.value)}
+              placeholder="Conte um pouco sobre você e seus gostos musicais..."
+              rows={3}
+              className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-purple-500 transition-all resize-none"
+            />
+          </div>
+        ) : bio && (
+          <div className="glass rounded-2xl p-6 text-center">
+            <p className="text-gray-300 italic">"{bio}"</p>
+          </div>
+        )}
+
         {/* Email Section */}
-        <div className="glass rounded-2xl p-6 transition-all duration-300">
+        <div className="glass rounded-2xl p-6">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center">
               <Mail size={18} className="text-gray-400" />
@@ -498,6 +563,37 @@ export default function ProfilePage() {
             <Mail size={16} />
             <span>{user?.email}</span>
           </div>
+        </div>
+
+        {/* Edit and Logout Buttons */}
+        <div className="flex gap-4">
+          {!isEditing ? (
+            <button
+              onClick={() => setIsEditing(true)}
+              className="flex-1 bg-white/10 hover:bg-white/20 py-3 rounded-xl font-medium transition-all duration-300 flex items-center justify-center gap-2"
+            >
+              <Edit2 size={18} />
+              Editar Perfil
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => setIsEditing(false)}
+                className="flex-1 bg-white/10 hover:bg-white/20 py-3 rounded-xl font-medium transition-all duration-300 flex items-center justify-center gap-2"
+              >
+                <X size={18} />
+                Cancelar
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={loading}
+                className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 py-3 rounded-xl font-medium hover:opacity-90 transition-all duration-300 flex items-center justify-center gap-2"
+              >
+                <Save size={18} />
+                {loading ? 'Salvando...' : 'Salvar'}
+              </button>
+            </>
+          )}
         </div>
 
         {/* Logout Button */}
@@ -531,24 +627,24 @@ function StatCard({ icon, value, label, color, onClick, suffix = '' }: {
   suffix?: string 
 }) {
   const colorClasses = {
-    purple: 'bg-purple-500/20 group-hover:bg-purple-500/30 text-purple-400',
-    pink: 'bg-pink-500/20 group-hover:bg-pink-500/30 text-pink-400',
-    green: 'bg-green-500/20 group-hover:bg-green-500/30 text-green-400',
-    orange: 'bg-orange-500/20 group-hover:bg-orange-500/30 text-orange-400'
+    purple: 'from-purple-500/20 to-purple-600/20 text-purple-400',
+    pink: 'from-pink-500/20 to-red-500/20 text-pink-400',
+    green: 'from-green-500/20 to-emerald-500/20 text-green-400',
+    orange: 'from-orange-500/20 to-amber-500/20 text-orange-400'
   }
 
   return (
     <div 
-      className="glass rounded-2xl p-5 text-center group hover:scale-105 transition-all duration-300 cursor-pointer"
+      className="glass rounded-2xl p-4 text-center group hover:scale-105 transition-all duration-300 cursor-pointer"
       onClick={onClick}
     >
-      <div className={`w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-3 transition-all duration-300 ${colorClasses[color as keyof typeof colorClasses]}`}>
+      <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${colorClasses[color as keyof typeof colorClasses]} flex items-center justify-center mx-auto mb-2 transition-all duration-300`}>
         {icon}
       </div>
       <div className="text-2xl font-bold text-white">
         {value}{suffix}
       </div>
-      <div className="text-sm text-gray-400">{label}</div>
+      <div className="text-xs text-gray-400">{label}</div>
     </div>
   )
 }
