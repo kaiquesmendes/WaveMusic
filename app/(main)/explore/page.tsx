@@ -1,14 +1,13 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { MusicGrid } from '@/components/Music/MusicGrid'
 import { SearchBar } from '@/components/Search/SearchBar'
 import { supabase } from '@/lib/supabase/client'
 import { Musica } from '@/types'
-import { Compass, User, Album, Mic2, Disc3, ChevronRight } from 'lucide-react'
+import { Compass, Mic2, Disc3, ChevronRight, Music, Play } from 'lucide-react'
 import Image from 'next/image'
-import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { usePlayerStore } from '@/store/playerStore'
 
 interface Artista {
   nome: string
@@ -35,7 +34,8 @@ export default function ExplorePage() {
   const [searchMode, setSearchMode] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedArtista, setSelectedArtista] = useState<Artista | null>(null)
-  const router = useRouter()
+  const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null)
+  const { setCurrentSong } = usePlayerStore()
 
   useEffect(() => {
     fetchExploreData()
@@ -46,7 +46,6 @@ export default function ExplorePage() {
     
     const supabaseAny = supabase as any
     
-    // Buscar todas as músicas (limitado a 100 para performance)
     const { data: musicas } = await supabaseAny
       .from('musicas')
       .select('*')
@@ -54,9 +53,8 @@ export default function ExplorePage() {
 
     if (musicas && musicas.length > 0) {
       setTodasMusicas(musicas)
-      setFilteredMusicas(musicas.slice(0, 20)) // Mostra apenas 20 inicialmente
+      setFilteredMusicas(musicas.slice(0, 20))
       
-      // Agrupar por artista
       const artistasMap = new Map<string, Artista>()
       const albunsMap = new Map<string, Album>()
       
@@ -73,7 +71,6 @@ export default function ExplorePage() {
         const artista = artistasMap.get(musica.artista)!
         artista.musicas.push(musica)
         
-        // Adicionar gêneros (split por vírgula)
         if (musica.genero) {
           const generosList = musica.genero.split(',').map(g => g.trim())
           generosList.forEach(genero => {
@@ -116,12 +113,14 @@ export default function ExplorePage() {
     if (!query.trim()) {
       setSearchMode(false)
       setSelectedArtista(null)
+      setSelectedAlbum(null)
       setFilteredMusicas(todasMusicas.slice(0, 20))
       return
     }
     
     setSearchMode(true)
     setSelectedArtista(null)
+    setSelectedAlbum(null)
     
     const supabaseAny = supabase as any
     const { data } = await supabaseAny
@@ -137,14 +136,30 @@ export default function ExplorePage() {
 
   const selectArtista = (artista: Artista) => {
     setSelectedArtista(artista)
+    setSelectedAlbum(null)
     setSearchMode(true)
     setSearchQuery(artista.nome)
     setFilteredMusicas(artista.musicas)
   }
 
+  const selectAlbum = (album: Album) => {
+    setSelectedAlbum(album)
+    setSelectedArtista(null)
+    setSearchMode(true)
+    setSearchQuery(album.nome)
+    setFilteredMusicas(album.musicas)
+  }
+
+  const playAlbum = (album: Album) => {
+    if (album.musicas.length > 0) {
+      setCurrentSong(album.musicas[0], album.musicas)
+    }
+  }
+
   const backToExplore = () => {
     setSearchMode(false)
     setSelectedArtista(null)
+    setSelectedAlbum(null)
     setSearchQuery('')
     setFilteredMusicas(todasMusicas.slice(0, 20))
   }
@@ -166,7 +181,6 @@ export default function ExplorePage() {
   if (selectedArtista) {
     return (
       <div className="space-y-6 animate-fade-in pb-20">
-        {/* Botão voltar */}
         <button 
           onClick={backToExplore}
           className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors mb-4 group"
@@ -175,7 +189,6 @@ export default function ExplorePage() {
           Voltar para Explorar
         </button>
 
-        {/* Header do Artista */}
         <div className="relative h-64 rounded-2xl overflow-hidden mb-8">
           <div className="absolute inset-0 bg-gradient-to-r from-purple-600 to-pink-600" />
           <div className="absolute inset-0 bg-black/40" />
@@ -210,7 +223,6 @@ export default function ExplorePage() {
           </div>
         </div>
 
-        {/* Músicas do Artista */}
         <section>
           <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
             <Music size={22} />
@@ -219,18 +231,21 @@ export default function ExplorePage() {
           <MusicGrid musicas={selectedArtista.musicas} />
         </section>
 
-        {/* Álbuns do Artista */}
         {albuns.filter(a => a.artista === selectedArtista.nome).length > 0 && (
           <section>
             <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
-              <Album size={22} />
+              <Disc3 size={22} />
               Álbuns
             </h2>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
               {albuns
                 .filter(a => a.artista === selectedArtista.nome)
                 .map((album) => (
-                  <div key={album.id} className="glass rounded-xl p-4 hover:scale-105 transition-all cursor-pointer group">
+                  <div 
+                    key={album.id} 
+                    onClick={() => selectAlbum(album)}
+                    className="glass rounded-xl p-4 hover:scale-105 transition-all cursor-pointer group"
+                  >
                     <div className="relative aspect-square rounded-lg overflow-hidden mb-3">
                       <Image
                         src={album.capa}
@@ -238,6 +253,9 @@ export default function ExplorePage() {
                         fill
                         className="object-cover"
                       />
+                      <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Play size={24} className="text-white" />
+                      </div>
                     </div>
                     <h3 className="text-white font-medium truncate">{album.nome}</h3>
                     <p className="text-gray-400 text-sm">{album.ano}</p>
@@ -247,6 +265,62 @@ export default function ExplorePage() {
             </div>
           </section>
         )}
+      </div>
+    )
+  }
+
+  // Se está visualizando um álbum específico
+  if (selectedAlbum) {
+    return (
+      <div className="space-y-6 animate-fade-in pb-20">
+        <button 
+          onClick={backToExplore}
+          className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors mb-4 group"
+        >
+          <ChevronRight size={18} className="rotate-180 group-hover:-translate-x-1 transition-transform" />
+          Voltar para Explorar
+        </button>
+
+        <div className="relative h-80 rounded-2xl overflow-hidden mb-8">
+          <div className="absolute inset-0 bg-gradient-to-r from-purple-600 to-pink-600" />
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative h-full flex flex-col md:flex-row items-center justify-center gap-8 p-8">
+            <div className="relative w-48 h-48 rounded-2xl overflow-hidden shadow-2xl">
+              <Image
+                src={selectedAlbum.capa}
+                alt={selectedAlbum.nome}
+                fill
+                className="object-cover"
+              />
+            </div>
+            <div className="text-center md:text-left">
+              <div className="flex items-center gap-2 mb-2 justify-center md:justify-start">
+                <Disc3 size={20} className="text-purple-400" />
+                <span className="text-sm text-white/80">Álbum</span>
+              </div>
+              <h1 className="text-3xl md:text-5xl font-bold text-white mb-2">
+                {selectedAlbum.nome}
+              </h1>
+              <p className="text-white/80 text-lg mb-2">{selectedAlbum.artista}</p>
+              <p className="text-gray-400 mb-4">{selectedAlbum.ano} • {selectedAlbum.musicas.length} músicas</p>
+              <button
+                onClick={() => playAlbum(selectedAlbum)}
+                className="bg-gradient-to-r from-purple-500 to-pink-500 px-8 py-3 rounded-full font-semibold hover:scale-105 transition-transform flex items-center gap-2 mx-auto md:mx-0"
+              >
+                <Play size={18} fill="white" />
+                Reproduzir Álbum
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <section>
+          <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
+            <Music size={22} />
+            Músicas do Álbum
+          </h2>
+          <MusicGrid musicas={selectedAlbum.musicas} />
+        </section>
       </div>
     )
   }
@@ -305,9 +379,6 @@ export default function ExplorePage() {
               <Mic2 size={22} className="text-purple-400" />
               <h2 className="text-xl md:text-2xl font-bold text-white">Artistas em Destaque</h2>
             </div>
-            <button className="text-sm text-gray-400 hover:text-white transition-colors">
-              Ver todos →
-            </button>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             {artistas.slice(0, 10).map((artista) => (
@@ -341,7 +412,11 @@ export default function ExplorePage() {
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             {albuns.slice(0, 10).map((album) => (
-              <div key={album.id} className="glass rounded-xl p-4 hover:scale-105 transition-all cursor-pointer group">
+              <div 
+                key={album.id} 
+                onClick={() => selectAlbum(album)}
+                className="glass rounded-xl p-4 hover:scale-105 transition-all cursor-pointer group"
+              >
                 <div className="relative aspect-square rounded-lg overflow-hidden mb-3">
                   <Image
                     src={album.capa}
@@ -349,6 +424,9 @@ export default function ExplorePage() {
                     fill
                     className="object-cover"
                   />
+                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Play size={24} className="text-white" />
+                  </div>
                 </div>
                 <h3 className="text-white font-medium truncate">{album.nome}</h3>
                 <p className="text-gray-400 text-sm truncate">{album.artista}</p>
@@ -376,16 +454,5 @@ export default function ExplorePage() {
         )}
       </section>
     </div>
-  )
-}
-
-// Componente auxiliar
-function Music(props: any) {
-  return (
-    <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M9 18V5l12-2v13" />
-      <circle cx="6" cy="18" r="3" />
-      <circle cx="18" cy="16" r="3" />
-    </svg>
   )
 }
