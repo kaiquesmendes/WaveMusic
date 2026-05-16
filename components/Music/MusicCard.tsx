@@ -1,7 +1,7 @@
 'use client'
 
 import Image from 'next/image'
-import { Play, Heart, MoreHorizontal } from 'lucide-react'
+import { Play, Heart } from 'lucide-react'
 import { Musica } from '@/types'
 import { usePlayerStore } from '@/store/playerStore'
 import { useFavorites } from '@/lib/hooks/useFavorites'
@@ -99,3 +99,6 @@ export function MusicCard({ music, variant = 'default' }: MusicCardProps) {
     </div>
   )
 }
+
+// Adicione o import do Music
+import { Music } from 'lucide-react'

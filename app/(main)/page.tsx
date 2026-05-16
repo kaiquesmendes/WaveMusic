@@ -29,69 +29,28 @@ export default function HomePage() {
       .select('*')
       .limit(50)
 
-    if (musicas) {
+    if (musicas && musicas.length > 0) {
       setRecentSongs(musicas.slice(0, 8))
+      setRecommendations(musicas.slice(8, 16))
       
-      // Sistema de recomendação baseado em histórico e favoritos
-      let recommendedIds: string[] = []
-      
-      if (user) {
-        // Buscar histórico do usuário
-        const { data: history } = await supabase
-          .from('historico')
-          .select('musica:musica_id(*)')
-          .eq('usuario_id', user.id)
-          .order('played_at', { ascending: false })
-          .limit(10)
-        
-        // Buscar favoritos do usuário
-        const { data: userFavorites } = await supabase
+      // Se usuário logado, buscar favoritos
+      if (user?.id) {
+        const { data: favoritosData } = await supabase
           .from('favoritos')
-          .select('musica:musica_id(*)')
+          .select(`
+            musica_id,
+            musicas:musica_id (*)
+          `)
           .eq('usuario_id', user.id)
-        
-        if (userFavorites) {
-          setFavorites(userFavorites.map(f => f.musica as unknown as Musica))
-        }
-        
-        // Obter gêneros favoritos do usuário
-        const favoriteMusics = userFavorites?.map(f => f.musica as unknown as Musica) || []
-        const historyMusics = history?.map(h => h.musica as unknown as Musica) || []
-        const allUserMusics = [...favoriteMusics, ...historyMusics]
-        
-        // Contar gêneros
-        const genreCount: Record<string, number> = {}
-        allUserMusics.forEach(m => {
-          if (m.genero) {
-            genreCount[m.genero] = (genreCount[m.genero] || 0) + 1
-          }
-        })
-        
-        // Encontrar gênero favorito
-        const topGenre = Object.entries(genreCount).sort((a, b) => b[1] - a[1])[0]?.[0]
-        
-        // Buscar recomendações do mesmo gênero
-        if (topGenre) {
-          const { data: genreMusics } = await supabase
-            .from('musicas')
-            .select('*')
-            .eq('genero', topGenre)
-            .limit(8)
-          
-          if (genreMusics) {
-            recommendedIds = genreMusics.map(m => m.id)
-          }
+          .limit(8)
+
+        if (favoritosData && favoritosData.length > 0) {
+          const musicasFavoritas = favoritosData
+            .map(item => (item as any).musicas)
+            .filter((m): m is Musica => m !== null)
+          setFavorites(musicasFavoritas)
         }
       }
-      
-      // Se não tiver recomendações baseadas em gênero, pega músicas aleatórias
-      if (recommendedIds.length === 0) {
-        const shuffled = [...musicas].sort(() => 0.5 - Math.random())
-        recommendedIds = shuffled.slice(8, 16).map(m => m.id)
-      }
-      
-      const recommended = musicas.filter(m => recommendedIds.includes(m.id))
-      setRecommendations(recommended.slice(0, 8))
     }
     
     setLoading(false)
@@ -132,7 +91,7 @@ export default function HomePage() {
             <Heart size={22} className="text-pink-400" fill="currentColor" />
             <h2 className="text-xl md:text-2xl font-bold text-white">Suas Curtidas</h2>
           </div>
-          <MusicGrid musicas={favorites.slice(0, 8)} loading={loading} />
+          <MusicGrid musicas={favorites} loading={loading} />
         </section>
       )}
 
