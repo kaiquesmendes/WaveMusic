@@ -3,7 +3,9 @@ import { Musica } from '@/types'
 
 export const musicService = {
   async getAll(): Promise<Musica[]> {
-    const { data, error } = await supabase
+    const supabaseAny = supabase as any
+    
+    const { data, error } = await supabaseAny
       .from('musicas')
       .select('*')
       .order('created_at', { ascending: false })
@@ -13,7 +15,9 @@ export const musicService = {
   },
 
   async getById(id: string): Promise<Musica | null> {
-    const { data, error } = await supabase
+    const supabaseAny = supabase as any
+    
+    const { data, error } = await supabaseAny
       .from('musicas')
       .select('*')
       .eq('id', id)
@@ -24,7 +28,9 @@ export const musicService = {
   },
 
   async search(query: string): Promise<Musica[]> {
-    const { data, error } = await supabase
+    const supabaseAny = supabase as any
+    
+    const { data, error } = await supabaseAny
       .from('musicas')
       .select('*')
       .or(`titulo.ilike.%${query}%,artista.ilike.%${query}%`)
@@ -35,7 +41,9 @@ export const musicService = {
   },
 
   async getByGenre(genero: string): Promise<Musica[]> {
-    const { data, error } = await supabase
+    const supabaseAny = supabase as any
+    
+    const { data, error } = await supabaseAny
       .from('musicas')
       .select('*')
       .eq('genero', genero)
@@ -45,7 +53,9 @@ export const musicService = {
   },
 
   async getRecent(limit: number = 10): Promise<Musica[]> {
-    const { data, error } = await supabase
+    const supabaseAny = supabase as any
+    
+    const { data, error } = await supabaseAny
       .from('musicas')
       .select('*')
       .order('created_at', { ascending: false })

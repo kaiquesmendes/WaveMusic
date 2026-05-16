@@ -3,18 +3,40 @@ import { Musica } from '@/types'
 
 export const favoriteService = {
   async getUserFavorites(userId: string): Promise<Musica[]> {
-    const { data, error } = await supabase
+    // Usar any para evitar erro de tipo
+    const supabaseAny = supabase as any
+    
+    const { data, error } = await supabaseAny
       .from('favoritos')
-      .select('musica:*')
+      .select('musica_id')
       .eq('usuario_id', userId)
       .order('created_at', { ascending: false })
     
     if (error) throw error
-    return data?.map(item => item.musica as unknown as Musica) || []
+    
+    if (!data || data.length === 0) return []
+    
+    // Buscar os detalhes das músicas
+    const musicasIds = data.map((item: any) => item.musica_id)
+    const { data: musicasData, error: musicasError } = await supabaseAny
+      .from('musicas')
+      .select('*')
+      .in('id', musicasIds)
+    
+    if (musicasError) throw musicasError
+    
+    // Manter a ordem original
+    const orderedMusicas = musicasIds
+      .map((id: string) => musicasData?.find((m: any) => m.id === id))
+      .filter(Boolean) as Musica[]
+    
+    return orderedMusicas
   },
 
   async isFavorite(userId: string, musicaId: string): Promise<boolean> {
-    const { count, error } = await supabase
+    const supabaseAny = supabase as any
+    
+    const { count, error } = await supabaseAny
       .from('favoritos')
       .select('*', { count: 'exact', head: true })
       .eq('usuario_id', userId)
@@ -25,7 +47,9 @@ export const favoriteService = {
   },
 
   async addFavorite(userId: string, musicaId: string): Promise<void> {
-    const { error } = await supabase
+    const supabaseAny = supabase as any
+    
+    const { error } = await supabaseAny
       .from('favoritos')
       .insert({ usuario_id: userId, musica_id: musicaId })
     
@@ -33,7 +57,9 @@ export const favoriteService = {
   },
 
   async removeFavorite(userId: string, musicaId: string): Promise<void> {
-    const { error } = await supabase
+    const supabaseAny = supabase as any
+    
+    const { error } = await supabaseAny
       .from('favoritos')
       .delete()
       .eq('usuario_id', userId)
