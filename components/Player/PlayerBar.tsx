@@ -8,10 +8,81 @@ import { formatTime } from '@/lib/utils/formatTime'
 import Image from 'next/image'
 import { Heart } from 'lucide-react'
 import { useFavorites } from '@/lib/hooks/useFavorites'
+import { useEffect } from 'react'
 
 export function PlayerBar() {
-  const { currentSong, duration, currentTime } = usePlayerStore()
+  const { currentSong, duration, currentTime, isPlaying } = usePlayerStore()
   const { favorites, toggleFavorite } = useFavorites()
+
+  // Adiciona suporte para lock screen (NÃO QUEBRA NADA NO PC)
+  useEffect(() => {
+    if (!currentSong) return
+
+    // Verifica se o navegador suporta (PCs modernos também suportam)
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: currentSong.titulo,
+          artist: currentSong.artista,
+          album: currentSong.album || 'WaveMusic',
+          artwork: [
+            { src: currentSong.url_capa || '/images/default-album.svg', sizes: '96x96', type: 'image/jpeg' },
+            { src: currentSong.url_capa || '/images/default-album.svg', sizes: '128x128', type: 'image/jpeg' },
+            { src: currentSong.url_capa || '/images/default-album.svg', sizes: '192x192', type: 'image/jpeg' },
+            { src: currentSong.url_capa || '/images/default-album.svg', sizes: '256x256', type: 'image/jpeg' },
+            { src: currentSong.url_capa || '/images/default-album.svg', sizes: '384x384', type: 'image/jpeg' },
+            { src: currentSong.url_capa || '/images/default-album.svg', sizes: '512x512', type: 'image/jpeg' }
+          ]
+        })
+
+        navigator.mediaSession.setActionHandler('play', () => usePlayerStore.getState().togglePlay())
+        navigator.mediaSession.setActionHandler('pause', () => usePlayerStore.getState().togglePlay())
+        navigator.mediaSession.setActionHandler('previoustrack', () => usePlayerStore.getState().previousSong())
+        navigator.mediaSession.setActionHandler('nexttrack', () => usePlayerStore.getState().nextSong())
+      } catch (error) {
+        console.log('MediaSession não suportada neste navegador')
+      }
+    }
+
+    return () => {
+      if ('mediaSession' in navigator) {
+        try {
+          navigator.mediaSession.setActionHandler('play', null)
+          navigator.mediaSession.setActionHandler('pause', null)
+          navigator.mediaSession.setActionHandler('previoustrack', null)
+          navigator.mediaSession.setActionHandler('nexttrack', null)
+        } catch (error) {
+          // Ignora erro ao limpar handlers
+        }
+      }
+    }
+  }, [currentSong])
+
+  // Atualiza estado de reprodução
+  useEffect(() => {
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused'
+      } catch (error) {
+        // Ignora erro
+      }
+    }
+  }, [isPlaying])
+
+  // Atualiza posição da música
+  useEffect(() => {
+    if ('mediaSession' in navigator && duration > 0) {
+      try {
+        navigator.mediaSession.setPositionState({
+          duration: duration,
+          position: currentTime,
+          playbackRate: 1
+        })
+      } catch (error) {
+        // Ignora erro
+      }
+    }
+  }, [currentTime, duration])
 
   if (!currentSong) {
     return (
