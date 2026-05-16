@@ -1,7 +1,7 @@
 'use client'
 
 import { Sidebar } from '@/components/Layout/Sidebar'
-import { Header } from '@/components/Layout/Header'
+import { Header } from '@/components/Layout/Layout/Header'
 import { PlayerBar } from '@/components/Player/PlayerBar'
 import { AuthGuard } from '@/components/Auth/AuthGuard'
 import { useEffect } from 'react'
