@@ -74,111 +74,119 @@ export default function ProfilePage() {
   }, [userData, user])
 
   async function fetchStats() {
-    if (!user) return
+  if (!user) return
 
-    const supabaseAny = supabase as any
+  const supabaseAny = supabase as any
 
-    const [playlistsCount, favoritesCount, historyCount] = await Promise.all([
-      supabaseAny.from('playlists').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
-      supabaseAny.from('favoritos').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
-      supabaseAny.from('historico').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
-    ])
+  const [playlistsCount, favoritesCount, historyCount] = await Promise.all([
+    supabaseAny.from('playlists').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
+    supabaseAny.from('favoritos').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
+    supabaseAny.from('historico').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
+  ])
 
-    const { data: historyData } = await supabaseAny
-      .from('historico')
-      .select(`
-        musica:musica_id (*)
-      `)
-      .eq('usuario_id', user.id)
-      .limit(500)
+  const { data: historyData } = await supabaseAny
+    .from('historico')
+    .select(`
+      musica:musica_id (*)
+    `)
+    .eq('usuario_id', user.id)
+    .limit(500)
 
-    const musicas = historyData?.map((item: any) => item.musica).filter(Boolean) || []
-    
-    const totalSeconds = musicas.reduce((acc: number, m: any) => acc + (m.duracao || 0), 0)
-    const totalMinutes = Math.floor(totalSeconds / 60)
-    const totalHours = Math.floor(totalMinutes / 60)
-    const totalSongs = musicas.length
+  const musicas = historyData?.map((item: any) => item.musica).filter(Boolean) || []
+  
+  const totalSeconds = musicas.reduce((acc: number, m: any) => acc + (m.duracao || 0), 0)
+  const totalMinutes = Math.floor(totalSeconds / 60)
+  const totalHours = Math.floor(totalMinutes / 60)
+  const totalSongs = musicas.length
 
-    const genreCount: Record<string, number> = {}
-    const artistCount: Record<string, number> = {}
-    const songCount: Record<string, { count: number; song: any }> = {}
-    
-    musicas.forEach((m: any) => {
-      if (m.genero && m.genero !== 'null' && m.genero !== '') {
-        genreCount[m.genero] = (genreCount[m.genero] || 0) + 1
-      }
-      if (m.artista && m.artista !== 'null' && m.artista !== '') {
-        artistCount[m.artista] = (artistCount[m.artista] || 0) + 1
-      }
-      if (m.id) {
-        if (!songCount[m.id]) {
-          songCount[m.id] = { count: 0, song: m }
-        }
-        songCount[m.id].count++
-      }
-    })
-    
-    const topGenreEntry = Object.entries(genreCount).sort((a, b) => b[1] - a[1])[0]
-    const topArtistEntry = Object.entries(artistCount).sort((a, b) => b[1] - a[1])[0]
-    const topSongEntry = Object.values(songCount).sort((a, b) => b.count - a.count)[0]
-    
-    const topGenre = topGenreEntry?.[0] || 'Nenhum ainda'
-    const topGenreCount = topGenreEntry?.[1] || 0
-    const favoriteArtist = topArtistEntry?.[0] || 'Nenhum ainda'
-    const favoriteArtistCount = topArtistEntry?.[1] || 0
-    const favoriteSong = topSongEntry?.song?.titulo || 'Nenhuma ainda'
-    const favoriteSongCount = topSongEntry?.count || 0
-    
-    // Definir banner baseado no artista favorito
-    if (favoriteArtist !== 'Nenhum ainda') {
-      const artistaData = artistas.find(a => a.nome === favoriteArtist)
-      setBannerImage(artistaData?.capa || '/images/default-album.svg')
-    } else {
-      setBannerImage('/images/default-album.svg')
+  const genreCount: Record<string, number> = {}
+  const artistCount: Record<string, number> = {}
+  const songCount: Record<string, { count: number; song: any }> = {}
+  
+  musicas.forEach((m: any) => {
+    if (m.genero && m.genero !== 'null' && m.genero !== '') {
+      genreCount[m.genero] = (genreCount[m.genero] || 0) + 1
     }
-    
-    // Calcular nível
-    let listeningLevel = 'Iniciante'
-    let levelProgress = 0
-    
-    if (totalHours >= 100) {
-      listeningLevel = 'Lendário 🏆'
-      levelProgress = 100
-    } else if (totalHours >= 50) {
-      listeningLevel = 'Expert 🎖️'
-      levelProgress = ((totalHours - 50) / 50) * 100
-    } else if (totalHours >= 20) {
-      listeningLevel = 'Avançado 🌟'
-      levelProgress = ((totalHours - 20) / 30) * 100
-    } else if (totalHours >= 5) {
-      listeningLevel = 'Intermediário 🎵'
-      levelProgress = ((totalHours - 5) / 15) * 100
-    } else if (totalHours > 0) {
-      listeningLevel = 'Aprendiz 🎧'
-      levelProgress = (totalHours / 5) * 100
-    } else {
-      levelProgress = 0
+    if (m.artista && m.artista !== 'null' && m.artista !== '') {
+      artistCount[m.artista] = (artistCount[m.artista] || 0) + 1
     }
+    if (m.id) {
+      if (!songCount[m.id]) {
+        songCount[m.id] = { count: 0, song: m }
+      }
+      songCount[m.id].count++
+    }
+  })
+  
+  const topGenreEntry = Object.entries(genreCount).sort((a, b) => b[1] - a[1])[0]
+  const topArtistEntry = Object.entries(artistCount).sort((a, b) => b[1] - a[1])[0]
+  const topSongEntry = Object.values(songCount).sort((a, b) => b.count - a.count)[0]
+  
+  const topGenre = topGenreEntry?.[0] || 'Nenhum ainda'
+  const topGenreCount = topGenreEntry?.[1] || 0
+  const favoriteArtist = topArtistEntry?.[0] || 'Nenhum ainda'
+  const favoriteArtistCount = topArtistEntry?.[1] || 0
+  const favoriteSong = topSongEntry?.song?.titulo || 'Nenhuma ainda'
+  const favoriteSongCount = topSongEntry?.count || 0
+  
+  // Definir banner baseado no artista favorito - CORRIGIDO
+  if (favoriteArtist !== 'Nenhum ainda') {
+    // Buscar uma capa do artista favorito
+    const { data: artistaMusica } = await supabaseAny
+      .from('musicas')
+      .select('url_capa')
+      .eq('artista', favoriteArtist)
+      .not('url_capa', 'is', null)
+      .limit(1)
     
-    levelProgress = Math.min(Math.max(levelProgress, 0), 100)
-
-    setStats({
-      playlists: playlistsCount.count || 0,
-      favorites: favoritesCount.count || 0,
-      history: historyCount.count || 0,
-      totalMinutes,
-      totalHours,
-      totalSongs,
-      topGenre,
-      topGenreCount,
-      favoriteArtist,
-      favoriteArtistCount,
-      favoriteSong,
-      favoriteSongCount,
-      listeningLevel,
-      levelProgress
-    })
+    const bannerUrl = artistaMusica?.[0]?.url_capa || '/images/default-album.svg'
+    setBannerImage(bannerUrl)
+  } else {
+    setBannerImage('/images/default-album.svg')
   }
+  
+  // Calcular nível
+  let listeningLevel = 'Iniciante'
+  let levelProgress = 0
+  
+  if (totalHours >= 100) {
+    listeningLevel = 'Lendário 🏆'
+    levelProgress = 100
+  } else if (totalHours >= 50) {
+    listeningLevel = 'Expert 🎖️'
+    levelProgress = ((totalHours - 50) / 50) * 100
+  } else if (totalHours >= 20) {
+    listeningLevel = 'Avançado 🌟'
+    levelProgress = ((totalHours - 20) / 30) * 100
+  } else if (totalHours >= 5) {
+    listeningLevel = 'Intermediário 🎵'
+    levelProgress = ((totalHours - 5) / 15) * 100
+  } else if (totalHours > 0) {
+    listeningLevel = 'Aprendiz 🎧'
+    levelProgress = (totalHours / 5) * 100
+  } else {
+    levelProgress = 0
+  }
+  
+  levelProgress = Math.min(Math.max(levelProgress, 0), 100)
+
+  setStats({
+    playlists: playlistsCount.count || 0,
+    favorites: favoritesCount.count || 0,
+    history: historyCount.count || 0,
+    totalMinutes,
+    totalHours,
+    totalSongs,
+    topGenre,
+    topGenreCount,
+    favoriteArtist,
+    favoriteArtistCount,
+    favoriteSong,
+    favoriteSongCount,
+    listeningLevel,
+    levelProgress
+  })
+}
 
   async function fetchRecentActivity() {
     if (!user) return
