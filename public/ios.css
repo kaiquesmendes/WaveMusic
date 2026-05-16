@@ -1,0 +1,17 @@
+/* public/ios.css - Corrige cantos no Safari iOS */
+body {
+  background: #000000;
+}
+
+/* Força o fundo preto para evitar cantos brancos */
+html {
+  background: #000000;
+}
+
+/* Ajuste para telas com notch */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+    background: #000000;
+  }
+}

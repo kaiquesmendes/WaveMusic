@@ -15,9 +15,17 @@
     overflow: hidden;
   }
 
+  html {
+    /* Corrige cantos brancos no iPhone */
+    background: #000000;
+  }
+
   body {
     @apply bg-gradient-to-br from-gray-950 via-black to-gray-950 text-white;
     font-feature-settings: "ss02", "cv02";
+    /* Corrige cantos arredondados no iPhone */
+    background-attachment: fixed;
+    background-size: cover;
   }
   
   /* Scrollbar Personalizada */
@@ -145,7 +153,7 @@
     }
   }
   
-  /* Responsividade */
+  /* Responsividade e Safe Areas */
   .safe-bottom {
     padding-bottom: env(safe-area-inset-bottom);
   }
@@ -153,25 +161,17 @@
   .safe-top {
     padding-top: env(safe-area-inset-top);
   }
-}
-
-/* Animações extras para login */
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-20px); }
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 0.6; }
-}
-
-.animate-float {
-  animation: float 6s ease-in-out infinite;
-}
-
-.animate-pulse-slow {
-  animation: pulse 4s ease-in-out infinite;
+  
+  /* Corrige cantos arredondados no iOS */
+  .ios-rounded-fix {
+    border-radius: 0;
+  }
+  
+  @supports (padding-bottom: env(safe-area-inset-bottom)) {
+    .ios-rounded-fix {
+      border-radius: 0;
+    }
+  }
 }
 
 /* Input autofill styles */
