@@ -14,15 +14,6 @@ interface SearchBarProps {
   onResultClick?: (music: Musica) => void
 }
 
-interface SearchResult {
-  type: 'musica' | 'artista' | 'album'
-  id: string
-  titulo: string
-  artista?: string
-  capa?: string
-  musicas?: number
-}
-
 export function SearchBar({ onSearch, initialValue = '', onResultClick }: SearchBarProps) {
   const [query, setQuery] = useState(initialValue)
   const [results, setResults] = useState<Musica[]>([])
@@ -60,21 +51,18 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
       setLoading(true)
       const supabaseAny = supabase as any
       
-      // Buscar músicas
       const { data: musicasData } = await supabaseAny
         .from('musicas')
         .select('*')
         .or(`titulo.ilike.%${query}%,artista.ilike.%${query}%,genero.ilike.%${query}%,album.ilike.%${query}%`)
         .limit(5)
       
-      // Buscar artistas únicos
       const { data: artistasData } = await supabaseAny
         .from('musicas')
         .select('artista, url_capa')
         .ilike('artista', `%${query}%`)
         .limit(5)
       
-      // Buscar álbuns únicos
       const { data: albunsData } = await supabaseAny
         .from('musicas')
         .select('album, artista, url_capa')
@@ -82,9 +70,7 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
         .ilike('album', `%${query}%`)
         .limit(5)
       
-      if (musicasData) {
-        setResults(musicasData)
-      }
+      if (musicasData) setResults(musicasData)
       
       if (artistasData) {
         const uniqueArtistas = Array.from(
@@ -132,16 +118,14 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
 
   const handleArtistaClick = (artista: string) => {
     setIsOpen(false)
-    setQuery(artista)
-    if (onSearch) onSearch(artista)
+    setQuery('')
     // Navegar para a página do artista no explorador
     router.push(`/explore?artista=${encodeURIComponent(artista)}`)
   }
 
   const handleAlbumClick = (album: string, artista: string) => {
     setIsOpen(false)
-    setQuery(album)
-    if (onSearch) onSearch(album)
+    setQuery('')
     // Navegar para a página do álbum no explorador
     router.push(`/explore?album=${encodeURIComponent(album)}&artista=${encodeURIComponent(artista)}`)
   }
@@ -158,7 +142,7 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
           onChange={handleChange}
           onFocus={() => hasResults && setIsOpen(true)}
           placeholder="Buscar músicas, artistas, álbuns..."
-          className="w-full pl-10 pr-10 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all text-sm"
+          className="w-full pl-10 pr-10 py-2.5 bg-white/10 border border-white/20 rounded-xl focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all text-white placeholder:text-gray-500"
         />
         {loading && (
           <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 animate-spin" />
@@ -170,9 +154,9 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
         )}
       </div>
 
-      {/* Search Results Dropdown */}
+      {/* Search Results Dropdown - Fundo OPACO corrigido */}
       {isOpen && hasResults && (
-        <div className="absolute top-full left-0 right-0 mt-2 glass rounded-xl overflow-hidden z-50 animate-fade-in max-h-96 overflow-y-auto">
+        <div className="absolute top-full left-0 right-0 mt-2 bg-black/95 backdrop-blur-xl rounded-xl border border-white/10 overflow-hidden z-50 animate-fade-in max-h-96 overflow-y-auto shadow-2xl">
           
           {/* Seção de Artistas */}
           {artistasResults.length > 0 && (
@@ -186,7 +170,7 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
                   onClick={() => handleArtistaClick(artista.artista)}
                   className="w-full flex items-center gap-3 p-2 hover:bg-white/10 rounded-lg transition-colors text-left"
                 >
-                  <div className="relative w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                  <div className="relative w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0">
                     {artista.url_capa ? (
                       <Image src={artista.url_capa} alt={artista.artista} fill className="object-cover" />
                     ) : (
@@ -214,7 +198,7 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
                   onClick={() => handleAlbumClick(album.album, album.artista)}
                   className="w-full flex items-center gap-3 p-2 hover:bg-white/10 rounded-lg transition-colors text-left"
                 >
-                  <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                  <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0">
                     {album.url_capa ? (
                       <Image src={album.url_capa} alt={album.album} fill className="object-cover" />
                     ) : (
@@ -240,22 +224,20 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
                 <button
                   key={music.id}
                   onClick={() => handleMusicClick(music)}
-                  className="w-full flex items-center gap-3 p-2 hover:bg-white/10 rounded-lg transition-colors text-left"
+                  className="w-full flex items-center gap-3 p-2 hover:bg-white/10 rounded-lg transition-colors text-left group"
                 >
-                  <div className="relative w-10 h-10 rounded-lg overflow-hidden">
+                  <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0">
                     {music.url_capa ? (
                       <Image src={music.url_capa} alt={music.titulo} fill className="object-cover" />
                     ) : (
-                      <div className="w-full h-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
-                        <Music size={16} className="text-white" />
-                      </div>
+                      <Music size={16} className="text-white" />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-white text-sm font-medium truncate">{music.titulo}</p>
                     <p className="text-gray-400 text-xs truncate">{music.artista}</p>
                   </div>
-                  <Play size={14} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <Play size={14} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                 </button>
               ))}
             </div>
