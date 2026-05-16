@@ -5,11 +5,23 @@ import { MusicGrid } from '@/components/Music/MusicGrid'
 import { SearchBar } from '@/components/Search/SearchBar'
 import { supabase } from '@/lib/supabase/client'
 import { Musica } from '@/types'
-import { Compass, Filter, X } from 'lucide-react'
+import { Compass, X } from 'lucide-react'
+
+interface MusicRow {
+  id: string
+  titulo: string
+  artista: string
+  album: string | null
+  duracao: number
+  url_audio: string
+  url_capa: string | null
+  genero: string | null
+  created_at: string
+}
 
 export default function ExplorePage() {
-  const [musicas, setMusicas] = useState<Musica[]>([])
-  const [filteredMusicas, setFilteredMusicas] = useState<Musica[]>([])
+  const [musicas, setMusicas] = useState<MusicRow[]>([])
+  const [filteredMusicas, setFilteredMusicas] = useState<MusicRow[]>([])
   const [loading, setLoading] = useState(true)
   const [generos, setGeneros] = useState<string[]>([])
   const [selectedGenero, setSelectedGenero] = useState('')
@@ -31,19 +43,18 @@ export default function ExplorePage() {
       return
     }
 
-    if (data) {
-      // Garantir que data é do tipo Musica[]
-      const musicasData = data as Musica[]
-      setMusicas(musicasData)
-      setFilteredMusicas(musicasData)
+    if (data && data.length > 0) {
+      setMusicas(data as MusicRow[])
+      setFilteredMusicas(data as MusicRow[])
       
-      // Extrair gêneros únicos (com segurança)
-      const uniqueGeneros = [...new Set(
-        musicasData
-          .map(m => m.genero)
-          .filter((genero): genero is string => Boolean(genero))
-      )]
-      setGeneros(uniqueGeneros)
+      // Extrair gêneros únicos
+      const generosSet = new Set<string>()
+      data.forEach((item: any) => {
+        if (item.genero && item.genero.trim()) {
+          generosSet.add(item.genero)
+        }
+      })
+      setGeneros(Array.from(generosSet))
     }
     setLoading(false)
   }
@@ -91,8 +102,7 @@ export default function ExplorePage() {
         <SearchBar onSearch={handleSearch} />
       </div>
 
-      {/* Genre Filters */}
-      {(generos.length > 0 || selectedGenero || searchQuery) && (
+      {generos.length > 0 && (
         <div className="flex gap-2 overflow-x-auto pb-2">
           <button
             onClick={clearFilters}
@@ -127,12 +137,11 @@ export default function ExplorePage() {
         </div>
       )}
 
-      {/* Results Count */}
       <div className="text-sm text-gray-400">
         {filteredMusicas.length} músicas encontradas
       </div>
 
-      <MusicGrid musicas={filteredMusicas} loading={loading} />
+      <MusicGrid musicas={filteredMusicas as any} loading={loading} />
     </div>
   )
 }
