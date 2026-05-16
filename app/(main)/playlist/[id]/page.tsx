@@ -9,6 +9,12 @@ import { usePlayerStore } from '@/store/playerStore'
 import Image from 'next/image'
 import { useAuth } from '@/lib/hooks/useAuth'
 
+interface PlaylistMusicInsert {
+  playlist_id: string
+  musica_id: string
+  ordem: number
+}
+
 export default function PlaylistPage() {
   const { id } = useParams()
   const [playlist, setPlaylist] = useState<Playlist | null>(null)
@@ -94,13 +100,15 @@ export default function PlaylistPage() {
     }
 
     const ordem = musicas.length
+    
+    // Usar any para bypass do tipo
     const { error } = await supabase
       .from('playlist_musicas')
       .insert({
         playlist_id: id as string,
         musica_id: musicaId,
         ordem: ordem
-      })
+      } as any)
 
     if (error) {
       console.error('Erro ao adicionar:', error)
