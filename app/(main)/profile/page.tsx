@@ -70,7 +70,6 @@ export default function ProfilePage() {
       supabase.from('historico').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
     ])
 
-    // Buscar histórico com join
     const { data: historyData } = await supabase
       .from('historico')
       .select(`
@@ -127,10 +126,17 @@ export default function ProfilePage() {
       .order('played_at', { ascending: false })
       .limit(6)
 
-    if (data) {
-      const activities = data
-        .map(item => ({ ...item, musica: (item as any).musica }))
-        .filter(a => a.musica)
+    if (data && data.length > 0) {
+      const activities = []
+      for (const item of data) {
+        const musicaData = (item as any).musica
+        if (musicaData) {
+          activities.push({
+            musica: musicaData,
+            played_at: (item as any).played_at
+          })
+        }
+      }
       setRecentActivities(activities)
     }
   }
@@ -146,9 +152,9 @@ export default function ProfilePage() {
       .eq('usuario_id', user.id)
       .limit(100)
 
-    if (data) {
+    if (data && data.length > 0) {
       const musicCount: Record<string, any> = {}
-      data.forEach(item => {
+      for (const item of data) {
         const musica = (item as any).musica
         if (musica && musica.id) {
           if (!musicCount[musica.id]) {
@@ -156,7 +162,7 @@ export default function ProfilePage() {
           }
           musicCount[musica.id].count++
         }
-      })
+      }
       const top3 = Object.values(musicCount).sort((a: any, b: any) => b.count - a.count).slice(0, 3)
       setTopMusics(top3)
     }
