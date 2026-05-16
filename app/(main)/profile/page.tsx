@@ -49,11 +49,14 @@ export default function ProfilePage() {
     topGenreCount: 0,
     favoriteArtist: '',
     favoriteArtistCount: 0,
+    favoriteSong: '',
+    favoriteSongCount: 0,
     listeningLevel: '',
     levelProgress: 0
   })
   const [recentActivities, setRecentActivities] = useState<any[]>([])
   const [topMusics, setTopMusics] = useState<any[]>([])
+  const [bannerImage, setBannerImage] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
 
@@ -81,7 +84,6 @@ export default function ProfilePage() {
       supabaseAny.from('historico').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
     ])
 
-    // Buscar histórico com detalhes das músicas
     const { data: historyData } = await supabaseAny
       .from('historico')
       .select(`
@@ -92,15 +94,14 @@ export default function ProfilePage() {
 
     const musicas = historyData?.map((item: any) => item.musica).filter(Boolean) || []
     
-    // Calcular tempo total
     const totalSeconds = musicas.reduce((acc: number, m: any) => acc + (m.duracao || 0), 0)
     const totalMinutes = Math.floor(totalSeconds / 60)
     const totalHours = Math.floor(totalMinutes / 60)
     const totalSongs = musicas.length
 
-    // Contar gêneros
     const genreCount: Record<string, number> = {}
     const artistCount: Record<string, number> = {}
+    const songCount: Record<string, { count: number; song: any }> = {}
     
     musicas.forEach((m: any) => {
       if (m.genero && m.genero !== 'null' && m.genero !== '') {
@@ -109,20 +110,37 @@ export default function ProfilePage() {
       if (m.artista && m.artista !== 'null' && m.artista !== '') {
         artistCount[m.artista] = (artistCount[m.artista] || 0) + 1
       }
+      if (m.id) {
+        if (!songCount[m.id]) {
+          songCount[m.id] = { count: 0, song: m }
+        }
+        songCount[m.id].count++
+      }
     })
     
-    // Encontrar top gênero e artista
     const topGenreEntry = Object.entries(genreCount).sort((a, b) => b[1] - a[1])[0]
     const topArtistEntry = Object.entries(artistCount).sort((a, b) => b[1] - a[1])[0]
+    const topSongEntry = Object.values(songCount).sort((a, b) => b.count - a.count)[0]
     
     const topGenre = topGenreEntry?.[0] || 'Nenhum ainda'
     const topGenreCount = topGenreEntry?.[1] || 0
     const favoriteArtist = topArtistEntry?.[0] || 'Nenhum ainda'
     const favoriteArtistCount = topArtistEntry?.[1] || 0
+    const favoriteSong = topSongEntry?.song?.titulo || 'Nenhuma ainda'
+    const favoriteSongCount = topSongEntry?.count || 0
+    
+    // Definir banner baseado no artista favorito
+    if (favoriteArtist !== 'Nenhum ainda') {
+      const artistaData = artistas.find(a => a.nome === favoriteArtist)
+      setBannerImage(artistaData?.capa || '/images/default-album.svg')
+    } else {
+      setBannerImage('/images/default-album.svg')
+    }
     
     // Calcular nível
     let listeningLevel = 'Iniciante'
     let levelProgress = 0
+    
     if (totalHours >= 100) {
       listeningLevel = 'Lendário 🏆'
       levelProgress = 100
@@ -135,12 +153,14 @@ export default function ProfilePage() {
     } else if (totalHours >= 5) {
       listeningLevel = 'Intermediário 🎵'
       levelProgress = ((totalHours - 5) / 15) * 100
-    } else if (totalHours >= 1) {
+    } else if (totalHours > 0) {
       listeningLevel = 'Aprendiz 🎧'
-      levelProgress = (totalHours / 1) * 100
+      levelProgress = (totalHours / 5) * 100
     } else {
-      levelProgress = totalSongs > 0 ? 10 : 0
+      levelProgress = 0
     }
+    
+    levelProgress = Math.min(Math.max(levelProgress, 0), 100)
 
     setStats({
       playlists: playlistsCount.count || 0,
@@ -153,8 +173,10 @@ export default function ProfilePage() {
       topGenreCount,
       favoriteArtist,
       favoriteArtistCount,
+      favoriteSong,
+      favoriteSongCount,
       listeningLevel,
-      levelProgress: Math.min(levelProgress, 100)
+      levelProgress
     })
   }
 
@@ -293,95 +315,103 @@ export default function ProfilePage() {
 
   return (
     <div className="min-h-screen pb-20 animate-fade-in">
-      {/* Hero Section com Gradiente e Avatar Central */}
-      {/* Hero Section com Gradiente e Avatar Central - VERSÃO CORRIGIDA */}
-<div className="relative h-40 md:h-52 rounded-2xl overflow-hidden mb-20 group">
-  <div className={`absolute inset-0 bg-gradient-to-r ${getLevelColor()} animate-gradient bg-[length:200%_200%]`} />
-  <div className="absolute inset-0 bg-black/30 group-hover:bg-black/20 transition-all duration-500" />
-  
-  {/* Nível */}
-  <div className="absolute top-3 right-3 glass rounded-full px-3 py-1 flex items-center gap-1.5 z-10">
-    <Award size={12} className="text-yellow-400" />
-    <span className="text-xs font-medium text-white">{stats.listeningLevel}</span>
-  </div>
-  
-  {/* Avatar Container - Corrigido para não cortar */}
-  <div className="absolute -bottom-10 left-1/2 transform -translate-x-1/2">
-    <div className="relative group/avatar">
-      <div className="relative w-20 h-20 md:w-24 md:h-24 rounded-full overflow-hidden border-3 border-white shadow-2xl transition-all duration-300 group-hover/avatar:scale-105">
-        {avatarUrl ? (
-          <Image src={avatarUrl} alt={nome} fill className="object-cover" />
-        ) : (
-          <div className="w-full h-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
-            <User size={32} className="text-white" />
+      {/* Hero Section com Banner Personalizado */}
+      <div className="relative h-64 md:h-80 rounded-2xl overflow-hidden mb-20 group">
+        {/* Banner de fundo baseado no artista favorito */}
+        <div className="absolute inset-0">
+          <Image
+            src={bannerImage}
+            alt="Banner"
+            fill
+            className="object-cover scale-110 group-hover:scale-100 transition-transform duration-700"
+          />
+          <div className={`absolute inset-0 bg-gradient-to-r ${getLevelColor()} opacity-70 mix-blend-overlay`} />
+          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent" />
+        </div>
+        
+        {/* Nível */}
+        <div className="absolute top-4 right-4 glass-dark rounded-full px-4 py-2 flex items-center gap-2 z-10">
+          <Award size={16} className="text-yellow-400" />
+          <span className="text-sm font-medium text-white">{stats.listeningLevel}</span>
+        </div>
+        
+        {/* Informação do Artista Favorito no Banner */}
+        {stats.favoriteArtist !== 'Nenhum ainda' && (
+          <div className="absolute bottom-4 left-4 glass-dark rounded-full px-3 py-1.5 flex items-center gap-2 z-10">
+            <Mic2 size={12} className="text-purple-400" />
+            <span className="text-xs text-white">Seu artista favorito: {stats.favoriteArtist}</span>
           </div>
         )}
+        
+        {/* Avatar Container */}
+        <div className="absolute -bottom-12 left-1/2 transform -translate-x-1/2">
+          <div className="relative group/avatar">
+            <div className="relative w-24 h-24 md:w-28 md:h-28 rounded-full overflow-hidden border-4 border-white shadow-2xl transition-all duration-300 group-hover/avatar:scale-105">
+              {avatarUrl ? (
+                <Image src={avatarUrl} alt={nome} fill className="object-cover" />
+              ) : (
+                <div className="w-full h-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                  <User size={36} className="text-white" />
+                </div>
+              )}
+            </div>
+            {isEditing && (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="absolute bottom-0 right-0 p-1.5 bg-black/70 rounded-full hover:bg-black transition-all duration-300 hover:scale-110"
+                disabled={uploading}
+              >
+                {uploading ? (
+                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Camera size={10} className="text-white" />
+                )}
+              </button>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleAvatarUpload}
+              className="hidden"
+            />
+          </div>
+        </div>
       </div>
-      {isEditing && (
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="absolute bottom-0 right-0 p-1 bg-black/70 rounded-full hover:bg-black transition-all duration-300 hover:scale-110"
-          disabled={uploading}
-        >
-          {uploading ? (
-            <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+
+      {/* Profile Content */}
+      <div className="max-w-4xl mx-auto px-4 space-y-8">
+        {/* Header Info */}
+        <div className="text-center mt-8">
+          {isEditing ? (
+            <input
+              type="text"
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              className="text-xl md:text-2xl font-bold bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white text-center focus:outline-none focus:border-purple-500 transition-all"
+              placeholder="Seu nome"
+            />
           ) : (
-            <Camera size={10} className="text-white" />
+            <h1 className="text-xl md:text-2xl font-bold text-white flex items-center justify-center gap-2">
+              {nome || user?.email?.split('@')[0]}
+              {stats.totalHours >= 50 && <Trophy size={18} className="text-yellow-400" />}
+            </h1>
           )}
-        </button>
-      )}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        onChange={handleAvatarUpload}
-        className="hidden"
-      />
-    </div>
-  </div>
+          <p className="text-gray-400 text-xs mt-1 flex items-center justify-center gap-2">
+            <Shield size={12} />
+            Membro desde {new Date(user?.created_at || '').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+          </p>
+        </div>
 
-  {/* Decorative Elements */}
-  <div className="absolute top-3 left-3 opacity-10 group-hover:opacity-20 transition-opacity duration-500">
-    <Headphones size={40} />
-  </div>
-  <div className="absolute bottom-3 right-3 opacity-10 group-hover:opacity-20 transition-opacity duration-500">
-    <Music size={35} />
-  </div>
-</div>
-
-{/* Profile Content */}
-<div className="max-w-4xl mx-auto px-4 space-y-8">
-  {/* Header Info */}
-  <div className="text-center mt-8">
-    {isEditing ? (
-      <input
-        type="text"
-        value={nome}
-        onChange={(e) => setNome(e.target.value)}
-        className="text-xl md:text-2xl font-bold bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white text-center focus:outline-none focus:border-purple-500 transition-all"
-        placeholder="Seu nome"
-      />
-    ) : (
-      <h1 className="text-xl md:text-2xl font-bold text-white flex items-center justify-center gap-2">
-        {nome || user?.email?.split('@')[0]}
-        {stats.totalHours >= 50 && <Trophy size={18} className="text-yellow-400" />}
-      </h1>
-    )}
-    <p className="text-gray-400 text-xs mt-1 flex items-center justify-center gap-2">
-      <Shield size={12} />
-      Membro desde {new Date(user?.created_at || '').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
-    </p>
-  </div>
-
-        {/* Level Progress Bar */}
+        {/* Level Progress Bar - CORRIGIDA */}
         <div className="glass rounded-2xl p-6">
           <div className="flex justify-between items-center mb-3">
-            <span className="text-sm text-gray-400">Progresso para próximo nível</span>
+            <span className="text-sm text-gray-400">Progresso para {stats.listeningLevel.includes('Lendário') ? 'o topo' : 'próximo nível'}</span>
             <span className="text-sm font-medium text-white">{Math.round(stats.levelProgress)}%</span>
           </div>
           <div className="h-2 bg-white/10 rounded-full overflow-hidden">
             <div 
-              className="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-500"
+              className={`h-full bg-gradient-to-r ${getLevelColor()} rounded-full transition-all duration-700 ease-out`}
               style={{ width: `${stats.levelProgress}%` }}
             />
           </div>
@@ -421,7 +451,7 @@ export default function ProfilePage() {
           />
         </div>
 
-        {/* Music Taste Section - Destaque */}
+        {/* Music Taste Section */}
         <div className="grid md:grid-cols-2 gap-6">
           <div className="glass rounded-2xl p-6 transition-all duration-300 hover:scale-[1.02] group">
             <div className="flex items-center gap-3 mb-4">
@@ -442,16 +472,16 @@ export default function ProfilePage() {
           <div className="glass rounded-2xl p-6 transition-all duration-300 hover:scale-[1.02] group">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-r from-orange-500 to-red-500 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Mic2 size={20} className="text-white" />
+                <Star size={20} className="text-white" />
               </div>
               <div>
-                <h3 className="text-sm text-gray-400">Artista Favorito</h3>
-                <p className="text-xl font-bold text-white">{stats.favoriteArtist}</p>
+                <h3 className="text-sm text-gray-400">Música Favorita</h3>
+                <p className="text-lg font-bold text-white truncate">{stats.favoriteSong}</p>
               </div>
             </div>
             <div className="flex items-center gap-2 text-sm text-gray-400">
-              <TrendingUp size={14} />
-              <span>{stats.favoriteArtistCount} músicas ouvidas</span>
+              <Headphones size={14} />
+              <span>Ouvida {stats.favoriteSongCount} {stats.favoriteSongCount === 1 ? 'vez' : 'vezes'}</span>
             </div>
           </div>
         </div>
