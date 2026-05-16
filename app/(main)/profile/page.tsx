@@ -27,13 +27,6 @@ import {
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 
-// Interface para o update do usuário
-interface UsuarioUpdate {
-  nome?: string
-  avatar_url?: string
-  updated_at?: string
-}
-
 export default function ProfilePage() {
   const { user, userData, refreshUser } = useAuth()
   const [isEditing, setIsEditing] = useState(false)
@@ -175,70 +168,70 @@ export default function ProfilePage() {
     }
   }
 
- 
-async function handleAvatarUpload(event: React.ChangeEvent<HTMLInputElement>) {
-  const file = event.target.files?.[0]
-  if (!file || !user) return
+  async function handleAvatarUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file || !user) return
 
-  setUploading(true)
-  const fileExt = file.name.split('.').pop()
-  const fileName = `${user.id}-${Date.now()}.${fileExt}`
-  const filePath = `avatars/${fileName}`
+    setUploading(true)
+    const fileExt = file.name.split('.').pop()
+    const fileName = `${user.id}-${Date.now()}.${fileExt}`
+    const filePath = `avatars/${fileName}`
 
-  const { error: uploadError } = await supabase.storage
-    .from('avatars')
-    .upload(filePath, file)
+    const { error: uploadError } = await supabase.storage
+      .from('avatars')
+      .upload(filePath, file)
 
-  if (uploadError) {
-    console.error('Erro ao fazer upload:', uploadError)
+    if (uploadError) {
+      console.error('Erro ao fazer upload:', uploadError)
+      setUploading(false)
+      return
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('avatars')
+      .getPublicUrl(filePath)
+
+    // Versão corrigida - usando any no supabase
+    const supabaseAny = supabase as any
+    const { error: updateError } = await supabaseAny
+      .from('usuarios')
+      .update({ avatar_url: publicUrl })
+      .eq('id', user.id)
+
+    if (!updateError) {
+      setAvatarUrl(publicUrl)
+      await refreshUser()
+    }
     setUploading(false)
-    return
   }
 
-  const { data: { publicUrl } } = supabase.storage
-    .from('avatars')
-    .getPublicUrl(filePath)
+  const handleSave = async () => {
+    if (!user) return
+    setLoading(true)
 
-  // Forçar o tipo com any diretamente na chamada
-  const { error: updateError } = await (supabase
-    .from('usuarios')
-    .update({ avatar_url: publicUrl } as any)
-    .eq('id', user.id) as any)
+    // Versão corrigida - usando any no supabase
+    const supabaseAny = supabase as any
+    const { error } = await supabaseAny
+      .from('usuarios')
+      .update({ 
+        nome, 
+        avatar_url: avatarUrl, 
+        updated_at: new Date().toISOString() 
+      })
+      .eq('id', user.id)
 
-  if (!updateError) {
-    setAvatarUrl(publicUrl)
-    await refreshUser()
+    if (!error) {
+      await refreshUser()
+      setIsEditing(false)
+    }
+    setLoading(false)
   }
-  setUploading(false)
-}
-
-const handleSave = async () => {
-  if (!user) return
-  setLoading(true)
-
-  // Forçar o tipo com any diretamente na chamada
-  const { error } = await (supabase
-    .from('usuarios')
-    .update({ 
-      nome, 
-      avatar_url: avatarUrl, 
-      updated_at: new Date().toISOString() 
-    } as any)
-    .eq('id', user.id) as any)
-
-  if (!error) {
-    await refreshUser()
-    setIsEditing(false)
-  }
-  setLoading(false)
-}
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
     router.push('/login')
   }
 
-  // Função para obter a cor do nível
   const getLevelColor = () => {
     const level = stats.listeningLevel
     if (level.includes('Lendário')) return 'text-yellow-400'
