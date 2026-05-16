@@ -168,61 +168,61 @@ export default function ProfilePage() {
     }
   }
 
-  async function handleAvatarUpload(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    if (!file || !user) return
+async function handleAvatarUpload(event: React.ChangeEvent<HTMLInputElement>) {
+  const file = event.target.files?.[0]
+  if (!file || !user) return
 
-    setUploading(true)
-    const fileExt = file.name.split('.').pop()
-    const fileName = `${user.id}-${Date.now()}.${fileExt}`
-    const filePath = `avatars/${fileName}`
+  setUploading(true)
+  const fileExt = file.name.split('.').pop()
+  const fileName = `${user.id}-${Date.now()}.${fileExt}`
+  const filePath = `avatars/${fileName}`
 
-    const { error: uploadError } = await supabase.storage
-      .from('avatars')
-      .upload(filePath, file)
+  const { error: uploadError } = await supabase.storage
+    .from('avatars')
+    .upload(filePath, file)
 
-    if (uploadError) {
-      console.error('Erro ao fazer upload:', uploadError)
-      setUploading(false)
-      return
-    }
-
-    const { data: { publicUrl } } = supabase.storage
-      .from('avatars')
-      .getPublicUrl(filePath)
-
-    const { error: updateError } = await supabase
-      .from('usuarios')
-      .update({ avatar_url: publicUrl })
-      .eq('id', user.id)
-
-    if (!updateError) {
-      setAvatarUrl(publicUrl)
-      await refreshUser()
-    }
+  if (uploadError) {
+    console.error('Erro ao fazer upload:', uploadError)
     setUploading(false)
+    return
   }
 
-  const handleSave = async () => {
-    if (!user) return
-    setLoading(true)
+  const { data: { publicUrl } } = supabase.storage
+    .from('avatars')
+    .getPublicUrl(filePath)
 
-    const { error } = await supabase
-      .from('usuarios')
-      .update({ 
-        nome, 
-        avatar_url: avatarUrl, 
-        updated_at: new Date().toISOString() 
-      })
-      .eq('id', user.id)
+  // Usar as any para resolver o erro de tipo
+  const { error: updateError } = await supabase
+    .from('usuarios')
+    .update({ avatar_url: publicUrl } as any)
+    .eq('id', user.id)
 
-    if (!error) {
-      await refreshUser()
-      setIsEditing(false)
-    }
-    setLoading(false)
+  if (!updateError) {
+    setAvatarUrl(publicUrl)
+    await refreshUser()
   }
+  setUploading(false)
+}
 
+const handleSave = async () => {
+  if (!user) return
+  setLoading(true)
+
+  const { error } = await supabase
+    .from('usuarios')
+    .update({ 
+      nome, 
+      avatar_url: avatarUrl, 
+      updated_at: new Date().toISOString() 
+    } as any)
+    .eq('id', user.id)
+
+  if (!error) {
+    await refreshUser()
+    setIsEditing(false)
+  }
+  setLoading(false)
+}
   const handleLogout = async () => {
     await supabase.auth.signOut()
     router.push('/login')
