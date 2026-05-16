@@ -5,7 +5,7 @@ import { MusicGrid } from '@/components/Music/MusicGrid'
 import { supabase } from '@/lib/supabase/client'
 import { Musica } from '@/types'
 import { usePlayerStore } from '@/store/playerStore'
-import { Play, TrendingUp, Clock, Heart, Sparkles, Headphones, Calendar, Flame, Star, RefreshCw } from 'lucide-react'
+import { Play, TrendingUp, Clock, Heart, Sparkles, Headphones, Calendar, Flame, Star, RefreshCw, Trophy } from 'lucide-react'
 import { useAuth } from '@/lib/hooks/useAuth'
 import Image from 'next/image'
 

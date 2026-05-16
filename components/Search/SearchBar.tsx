@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Search, X, Loader2, Play } from 'lucide-react' // Adicionei Play aqui
+import { Search, X, Loader2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { Musica } from '@/types'
 import Image from 'next/image'
@@ -9,15 +9,20 @@ import { usePlayerStore } from '@/store/playerStore'
 
 interface SearchBarProps {
   onSearch?: (query: string) => void
+  initialValue?: string
 }
 
-export function SearchBar({ onSearch }: SearchBarProps) {
-  const [query, setQuery] = useState('')
+export function SearchBar({ onSearch, initialValue = '' }: SearchBarProps) {
+  const [query, setQuery] = useState(initialValue)
   const [results, setResults] = useState<Musica[]>([])
   const [isOpen, setIsOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
   const { setCurrentSong } = usePlayerStore()
+
+  useEffect(() => {
+    setQuery(initialValue)
+  }, [initialValue])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -37,10 +42,11 @@ export function SearchBar({ onSearch }: SearchBarProps) {
       }
 
       setLoading(true)
-      const { data } = await supabase
+      const supabaseAny = supabase as any
+      const { data } = await supabaseAny
         .from('musicas')
         .select('*')
-        .or(`titulo.ilike.%${query}%,artista.ilike.%${query}%`)
+        .or(`titulo.ilike.%${query}%,artista.ilike.%${query}%,genero.ilike.%${query}%,album.ilike.%${query}%`)
         .limit(5)
       
       if (data) {
@@ -53,6 +59,12 @@ export function SearchBar({ onSearch }: SearchBarProps) {
     const debounce = setTimeout(searchMusic, 300)
     return () => clearTimeout(debounce)
   }, [query])
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value
+    setQuery(value)
+    if (onSearch) onSearch(value)
+  }
 
   const handleClear = () => {
     setQuery('')
@@ -74,10 +86,10 @@ export function SearchBar({ onSearch }: SearchBarProps) {
         <input
           type="text"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={handleChange}
           onFocus={() => results.length > 0 && setIsOpen(true)}
-          placeholder="Buscar músicas, artistas..."
-          className="w-full pl-10 pr-10 py-2 bg-white/5 border border-white/10 rounded-lg focus:outline-none focus:border-purple-500 transition-all text-sm"
+          placeholder="Buscar por música, artista, álbum ou gênero..."
+          className="w-full pl-10 pr-10 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-purple-500 transition-all text-sm"
         />
         {loading && (
           <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 animate-spin" />
@@ -91,7 +103,7 @@ export function SearchBar({ onSearch }: SearchBarProps) {
 
       {/* Search Results Dropdown */}
       {isOpen && results.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-2 glass rounded-xl overflow-hidden z-50 animate-fade-in">
+        <div className="absolute top-full left-0 right-0 mt-2 glass rounded-xl overflow-hidden z-50 animate-fade-in max-h-96 overflow-y-auto">
           {results.map((music) => (
             <button
               key={music.id}
@@ -117,3 +129,6 @@ export function SearchBar({ onSearch }: SearchBarProps) {
     </div>
   )
 }
+
+// Import Play
+import { Play } from 'lucide-react'
