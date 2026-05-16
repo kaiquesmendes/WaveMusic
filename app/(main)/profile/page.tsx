@@ -31,7 +31,6 @@ export default function ProfilePage() {
   const { user, userData, refreshUser } = useAuth()
   const [isEditing, setIsEditing] = useState(false)
   const [nome, setNome] = useState('')
-  const [bio, setBio] = useState('')
   const [avatarUrl, setAvatarUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -53,7 +52,6 @@ export default function ProfilePage() {
   useEffect(() => {
     if (userData) {
       setNome(userData.nome || '')
-      setBio(userData.bio || '')
       setAvatarUrl(userData.avatar_url || '')
     }
     if (user) {
@@ -72,21 +70,24 @@ export default function ProfilePage() {
       supabase.from('historico').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
     ])
 
+    // Buscar histórico com join
     const { data: historyData } = await supabase
       .from('historico')
-      .select('musica:musica_id(*)')
+      .select(`
+        musica:musica_id (*)
+      `)
       .eq('usuario_id', user.id)
       .limit(200)
 
-    const musicas = historyData?.map(h => h.musica as any).filter(Boolean) || []
+    const musicas = historyData?.map(item => (item as any).musica).filter(Boolean) || []
     
-    const totalSeconds = musicas.reduce((acc, m) => acc + (m.duracao || 0), 0)
+    const totalSeconds = musicas.reduce((acc: number, m: any) => acc + (m.duracao || 0), 0)
     const totalMinutes = Math.floor(totalSeconds / 60)
     const totalHours = Math.floor(totalMinutes / 60)
     
     const genreCount: Record<string, number> = {}
     const artistCount: Record<string, number> = {}
-    musicas.forEach(m => {
+    musicas.forEach((m: any) => {
       if (m.genero) genreCount[m.genero] = (genreCount[m.genero] || 0) + 1
       if (m.artista) artistCount[m.artista] = (artistCount[m.artista] || 0) + 1
     })
@@ -118,13 +119,19 @@ export default function ProfilePage() {
 
     const { data } = await supabase
       .from('historico')
-      .select('musica:musica_id(*), played_at')
+      .select(`
+        musica:musica_id (*),
+        played_at
+      `)
       .eq('usuario_id', user.id)
       .order('played_at', { ascending: false })
       .limit(6)
 
     if (data) {
-      setRecentActivities(data.filter(a => a.musica))
+      const activities = data
+        .map(item => ({ ...item, musica: (item as any).musica }))
+        .filter(a => a.musica)
+      setRecentActivities(activities)
     }
   }
 
@@ -133,14 +140,16 @@ export default function ProfilePage() {
 
     const { data } = await supabase
       .from('historico')
-      .select('musica:musica_id(*)')
+      .select(`
+        musica:musica_id (*)
+      `)
       .eq('usuario_id', user.id)
-      .limit(50)
+      .limit(100)
 
     if (data) {
       const musicCount: Record<string, any> = {}
       data.forEach(item => {
-        const musica = item.musica as any
+        const musica = (item as any).musica
         if (musica && musica.id) {
           if (!musicCount[musica.id]) {
             musicCount[musica.id] = { ...musica, count: 0 }
@@ -196,7 +205,6 @@ export default function ProfilePage() {
       .from('usuarios')
       .update({ 
         nome, 
-        bio, 
         avatar_url: avatarUrl, 
         updated_at: new Date().toISOString() 
       })
@@ -328,31 +336,6 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* Bio Section */}
-        {isEditing ? (
-          <div className="glass rounded-2xl p-6 transition-all duration-300">
-            <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
-              <Mic2 size={16} />
-              Bio
-            </label>
-            <textarea
-              value={bio}
-              onChange={(e) => setBio(e.target.value)}
-              placeholder="Conte um pouco sobre você e seus gostos musicais..."
-              rows={3}
-              className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-purple-500 transition-all resize-none"
-            />
-          </div>
-        ) : bio && (
-          <div className="glass rounded-2xl p-6 transition-all duration-300 hover:scale-[1.02]">
-            <p className="text-gray-300 italic flex items-start gap-2">
-              <span className="text-purple-400">"</span>
-              {bio}
-              <span className="text-purple-400">"</span>
-            </p>
-          </div>
-        )}
-
         {/* Stats Cards Premium */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard 
@@ -457,7 +440,7 @@ export default function ProfilePage() {
             </div>
             <div className="space-y-3">
               {recentActivities.map((activity, index) => {
-                const musica = activity.musica as any
+                const musica = activity.musica
                 if (!musica) return null
                 return (
                   <div key={index} className="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition-all group cursor-pointer">
