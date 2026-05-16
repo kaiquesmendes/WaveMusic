@@ -175,66 +175,63 @@ export default function ProfilePage() {
     }
   }
 
-  async function handleAvatarUpload(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    if (!file || !user) return
+ 
+async function handleAvatarUpload(event: React.ChangeEvent<HTMLInputElement>) {
+  const file = event.target.files?.[0]
+  if (!file || !user) return
 
-    setUploading(true)
-    const fileExt = file.name.split('.').pop()
-    const fileName = `${user.id}-${Date.now()}.${fileExt}`
-    const filePath = `avatars/${fileName}`
+  setUploading(true)
+  const fileExt = file.name.split('.').pop()
+  const fileName = `${user.id}-${Date.now()}.${fileExt}`
+  const filePath = `avatars/${fileName}`
 
-    const { error: uploadError } = await supabase.storage
-      .from('avatars')
-      .upload(filePath, file)
+  const { error: uploadError } = await supabase.storage
+    .from('avatars')
+    .upload(filePath, file)
 
-    if (uploadError) {
-      console.error('Erro ao fazer upload:', uploadError)
-      setUploading(false)
-      return
-    }
-
-    const { data: { publicUrl } } = supabase.storage
-      .from('avatars')
-      .getPublicUrl(filePath)
-
-    const updateData: UsuarioUpdate = {
-      avatar_url: publicUrl
-    }
-
-    const { error: updateError } = await supabase
-      .from('usuarios')
-      .update(updateData)
-      .eq('id', user.id)
-
-    if (!updateError) {
-      setAvatarUrl(publicUrl)
-      await refreshUser()
-    }
+  if (uploadError) {
+    console.error('Erro ao fazer upload:', uploadError)
     setUploading(false)
+    return
   }
 
-  const handleSave = async () => {
-    if (!user) return
-    setLoading(true)
+  const { data: { publicUrl } } = supabase.storage
+    .from('avatars')
+    .getPublicUrl(filePath)
 
-    const updateData: UsuarioUpdate = {
-      nome: nome,
-      avatar_url: avatarUrl,
-      updated_at: new Date().toISOString()
-    }
+  // Forçar o tipo com any diretamente na chamada
+  const { error: updateError } = await (supabase
+    .from('usuarios')
+    .update({ avatar_url: publicUrl } as any)
+    .eq('id', user.id) as any)
 
-    const { error } = await supabase
-      .from('usuarios')
-      .update(updateData)
-      .eq('id', user.id)
-
-    if (!error) {
-      await refreshUser()
-      setIsEditing(false)
-    }
-    setLoading(false)
+  if (!updateError) {
+    setAvatarUrl(publicUrl)
+    await refreshUser()
   }
+  setUploading(false)
+}
+
+const handleSave = async () => {
+  if (!user) return
+  setLoading(true)
+
+  // Forçar o tipo com any diretamente na chamada
+  const { error } = await (supabase
+    .from('usuarios')
+    .update({ 
+      nome, 
+      avatar_url: avatarUrl, 
+      updated_at: new Date().toISOString() 
+    } as any)
+    .eq('id', user.id) as any)
+
+  if (!error) {
+    await refreshUser()
+    setIsEditing(false)
+  }
+  setLoading(false)
+}
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
