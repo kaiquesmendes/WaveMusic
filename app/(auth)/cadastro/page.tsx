@@ -36,20 +36,24 @@ export default function CadastroPage() {
     setLoading(true)
     setError('')
 
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          nome: nome.trim(),
+    try {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            nome: nome.trim(),
+          },
         },
-      },
-    })
+      })
 
-    if (error) {
-      setError(error.message)
-    } else {
-      router.push('/login?message=Conta criada com sucesso! Faça login.')
+      if (error) {
+        setError(error.message)
+      } else {
+        router.push('/login?message=Conta criada com sucesso! Faça login.')
+      }
+    } catch (err) {
+      setError('Erro ao conectar. Tente novamente.')
     }
     setLoading(false)
   }
@@ -77,6 +81,15 @@ export default function CadastroPage() {
             </h1>
             <p className="text-gray-400 mt-2">Comece a ouvir música</p>
           </div>
+
+          {/* Success Message from Login */}
+          {typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('message') && (
+            <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-3 mb-6 animate-fade-in">
+              <p className="text-green-400 text-sm text-center">
+                {new URLSearchParams(window.location.search).get('message')}
+              </p>
+            </div>
+          )}
 
           {/* Error Message */}
           {error && (

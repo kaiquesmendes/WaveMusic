@@ -1,31 +1,27 @@
-'use client'
+import type { Metadata } from 'next'
+import { Inter } from 'next/font/google'
+import './globals.css'
+import { AuthProvider } from '@/contexts/AuthContext'
 
-import { Sidebar } from '@/components/Layout/Sidebar'
-import { Header } from '@/components/Layout/Layout/Header'
-import { PlayerBar } from '@/components/Player/PlayerBar'
-import { AuthGuard } from '@/components/Auth/AuthGuard'
+const inter = Inter({ subsets: ['latin'] })
 
-export default function MainLayout({
+export const metadata: Metadata = {
+  title: 'WaveMusic - Streaming de Música',
+  description: 'Plataforma moderna de streaming de música',
+}
+
+export default function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
   return (
-    <AuthGuard>
-      <div className="h-screen flex flex-col overflow-hidden">
-        <div className="flex flex-1 overflow-hidden">
-          <Sidebar />
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <Header />
-            <main className="flex-1 overflow-y-auto overscroll-contain">
-              <div className="container mx-auto px-4 md:px-6 py-4 md:py-6 pb-24 md:pb-28">
-                {children}
-              </div>
-            </main>
-          </div>
-        </div>
-        <PlayerBar />
-      </div>
-    </AuthGuard>
+    <html lang="pt-BR">
+      <body className={inter.className}>
+        <AuthProvider>
+          {children}
+        </AuthProvider>
+      </body>
+    </html>
   )
 }
