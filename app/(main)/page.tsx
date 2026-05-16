@@ -1,41 +1,128 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { MusicGrid } from '@/components/Music/MusicGrid'
 import { supabase } from '@/lib/supabase/client'
 import { Musica } from '@/types'
 import { usePlayerStore } from '@/store/playerStore'
-import { Play, TrendingUp, Clock, Heart, Sparkles, Headphones } from 'lucide-react'
+import { Play, TrendingUp, Clock, Heart, Sparkles, Headphones, Calendar, Flame, Star, RefreshCw } from 'lucide-react'
 import { useAuth } from '@/lib/hooks/useAuth'
+import Image from 'next/image'
 
 export default function HomePage() {
   const [recentSongs, setRecentSongs] = useState<Musica[]>([])
   const [recommendations, setRecommendations] = useState<Musica[]>([])
-  const [featuredSong, setFeaturedSong] = useState<Musica | null>(null)
+  const [featuredSongs, setFeaturedSongs] = useState<Musica[]>([])
+  const [weeklyTop, setWeeklyTop] = useState<Musica[]>([])
   const [favorites, setFavorites] = useState<Musica[]>([])
   const [loading, setLoading] = useState(true)
+  const [currentFeaturedIndex, setCurrentFeaturedIndex] = useState(0)
   const { setCurrentSong } = usePlayerStore()
   const { user } = useAuth()
 
+  // Carregar dados
   useEffect(() => {
     fetchAllData()
   }, [user])
 
+  // Carrossel de destaques (muda a cada 10 segundos)
+  useEffect(() => {
+    if (featuredSongs.length <= 1) return
+    
+    const interval = setInterval(() => {
+      setCurrentFeaturedIndex((prev) => (prev + 1) % featuredSongs.length)
+    }, 10000)
+    
+    return () => clearInterval(interval)
+  }, [featuredSongs.length])
+
   async function fetchAllData() {
     setLoading(true)
     
-    const { data: musicas } = await supabase
+    const supabaseAny = supabase as any
+    
+    // Buscar todas as músicas
+    const { data: musicas, error } = await supabaseAny
       .from('musicas')
       .select('*')
-      .limit(30)
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Erro ao buscar músicas:', error)
+      setLoading(false)
+      return
+    }
 
     if (musicas && musicas.length > 0) {
+      // Lançamentos (mais recentes)
       setRecentSongs(musicas.slice(0, 8))
-      setRecommendations(musicas.slice(8, 16))
-      setFeaturedSong(musicas[0])
+      
+      // Destaques da Semana (músicas aleatórias que mudam)
+      const shuffledForFeatured = [...musicas].sort(() => 0.5 - Math.random())
+      setFeaturedSongs(shuffledForFeatured.slice(0, 5))
+      
+      // Top da Semana (músicas mais populares - simulando com aleatório)
+      const shuffledForTop = [...musicas].sort(() => 0.5 - Math.random())
+      setWeeklyTop(shuffledForTop.slice(0, 6))
+      
+      // Sistema de recomendação personalizada
+      let recommendedIds: string[] = []
       
       if (user?.id) {
-        const supabaseAny = supabase as any
+        // Buscar favoritos e histórico do usuário
+        const { data: userFavorites } = await supabaseAny
+          .from('favoritos')
+          .select('musica:musica_id(*)')
+          .eq('usuario_id', user.id)
+        
+        const { data: userHistory } = await supabaseAny
+          .from('historico')
+          .select('musica:musica_id(*)')
+          .eq('usuario_id', user.id)
+          .limit(30)
+        
+        const favoriteMusics = userFavorites?.map((f: any) => f.musica) || []
+        const historyMusics = userHistory?.map((h: any) => h.musica) || []
+        const allUserMusics = [...favoriteMusics, ...historyMusics].filter(Boolean)
+        
+        if (allUserMusics.length > 0) {
+          // Contar gêneros preferidos
+          const genreCount: Record<string, number> = {}
+          allUserMusics.forEach((m: Musica) => {
+            if (m.genero && m.genero !== 'null' && m.genero !== '') {
+              genreCount[m.genero] = (genreCount[m.genero] || 0) + 1
+            }
+          })
+          
+          const topGenre = Object.entries(genreCount).sort((a, b) => b[1] - a[1])[0]?.[0]
+          
+          if (topGenre) {
+            const userMusicIds = new Set(allUserMusics.map((m: Musica) => m.id))
+            const { data: genreMusics } = await supabaseAny
+              .from('musicas')
+              .select('*')
+              .eq('genero', topGenre)
+              .limit(20)
+            
+            if (genreMusics) {
+              const newRecommendations = genreMusics.filter((m: Musica) => !userMusicIds.has(m.id))
+              recommendedIds = newRecommendations.slice(0, 12).map((m: Musica) => m.id)
+            }
+          }
+        }
+      }
+      
+      // Se não tiver recomendações, pega músicas aleatórias
+      if (recommendedIds.length === 0) {
+        const shuffled = [...musicas].sort(() => 0.5 - Math.random())
+        recommendedIds = shuffled.slice(0, 12).map((m: Musica) => m.id)
+      }
+      
+      const recommended = musicas.filter((m: Musica) => recommendedIds.includes(m.id))
+      setRecommendations(recommended.slice(0, 12))
+      
+      // Buscar favoritos do usuário
+      if (user?.id) {
         const { data: favoritosData } = await supabaseAny
           .from('favoritos')
           .select('musica_id')
@@ -59,76 +146,176 @@ export default function HomePage() {
     setLoading(false)
   }
 
+  const handleRefreshRecommendations = () => {
+    fetchAllData()
+  }
+
+  const currentFeatured = featuredSongs[currentFeaturedIndex]
+
   return (
-    <div className="space-y-8 md:space-y-10 animate-fade-in pb-20">
-      {/* Hero Banner - Featured */}
-      {featuredSong && (
-        <div className="relative h-64 md:h-80 rounded-2xl overflow-hidden group">
-          <div className="absolute inset-0 bg-gradient-to-r from-purple-600 via-pink-600 to-red-500 animate-gradient bg-[length:200%_200%]" />
-          <div className="absolute inset-0 bg-black/30 group-hover:bg-black/20 transition-all duration-500" />
+    <div className="space-y-10 md:space-y-12 animate-fade-in pb-20">
+      
+      {/* HERO SECTION - DESTAQUE DA SEMANA COM CARROSSEL */}
+      {currentFeatured && (
+        <div className="relative h-80 md:h-96 rounded-2xl overflow-hidden group">
+          {/* Background Image com overlay */}
+          <div className="absolute inset-0">
+            {currentFeatured.url_capa ? (
+              <>
+                <Image
+                  src={currentFeatured.url_capa}
+                  alt={currentFeatured.titulo}
+                  fill
+                  className="object-cover scale-110 group-hover:scale-100 transition-transform duration-700"
+                  priority
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent" />
+              </>
+            ) : (
+              <div className="absolute inset-0 bg-gradient-to-r from-purple-600 via-pink-600 to-red-500 animate-gradient bg-[length:200%_200%]" />
+            )}
+          </div>
           
-          <div className="relative h-full flex flex-col justify-center px-6 md:px-10">
+          {/* Conteúdo */}
+          <div className="relative h-full flex flex-col justify-end p-6 md:p-10">
             <div className="animate-slide-up">
-              <span className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-sm rounded-full px-3 py-1 text-xs font-medium mb-4">
-                <Sparkles size={12} className="text-yellow-400" />
-                Destaque da Semana
-              </span>
-              <h2 className="text-3xl md:text-5xl font-bold text-white mb-2">
-                {featuredSong.titulo}
+              <div className="flex items-center gap-2 mb-3">
+                <div className="bg-gradient-to-r from-purple-500 to-pink-500 rounded-full p-1">
+                  <Flame size={12} className="text-white" />
+                </div>
+                <span className="text-xs font-medium text-white/80">Destaque da Semana</span>
+                {featuredSongs.length > 1 && (
+                  <span className="text-xs text-white/40 ml-2">
+                    {currentFeaturedIndex + 1}/{featuredSongs.length}
+                  </span>
+                )}
+              </div>
+              
+              <h2 className="text-3xl md:text-5xl font-bold text-white mb-2 drop-shadow-lg">
+                {currentFeatured.titulo}
               </h2>
-              <p className="text-white/80 text-sm md:text-base mb-4">
-                {featuredSong.artista}
+              <p className="text-white/80 text-sm md:text-base mb-4 drop-shadow-lg">
+                {currentFeatured.artista}
               </p>
-              <button
-                onClick={() => setCurrentSong(featuredSong)}
-                className="bg-white text-black px-6 py-2.5 rounded-full font-semibold hover:scale-105 transition-transform w-fit flex items-center gap-2 shadow-xl"
-              >
-                <Play size={18} fill="black" />
-                Ouvir Agora
-              </button>
+              
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setCurrentSong(currentFeatured, featuredSongs)}
+                  className="bg-white text-black px-6 py-2.5 rounded-full font-semibold hover:scale-105 transition-transform flex items-center gap-2 shadow-xl"
+                >
+                  <Play size={18} fill="black" />
+                  Ouvir Agora
+                </button>
+                
+                {featuredSongs.length > 1 && (
+                  <div className="flex gap-1">
+                    {featuredSongs.map((_, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setCurrentFeaturedIndex(idx)}
+                        className={`h-1.5 rounded-full transition-all duration-300 ${
+                          idx === currentFeaturedIndex 
+                            ? 'w-8 bg-white' 
+                            : 'w-4 bg-white/40 hover:bg-white/60'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Seção de Favoritos */}
+      {/* SEÇÃO DE FAVORITOS */}
       {favorites.length > 0 && (
         <section>
-          <div className="flex items-center gap-2 mb-5">
-            <div className="p-2 rounded-xl bg-gradient-to-r from-pink-500/20 to-red-500/20">
-              <Heart size={20} className="text-pink-400" fill="currentColor" />
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-xl bg-gradient-to-r from-pink-500/20 to-red-500/20">
+                <Heart size={20} className="text-pink-400" fill="currentColor" />
+              </div>
+              <h2 className="text-xl md:text-2xl font-bold text-white">Suas Curtidas</h2>
             </div>
-            <h2 className="text-xl md:text-2xl font-bold text-white">Suas Curtidas</h2>
+            <button 
+              onClick={() => window.location.href = '/favorites'}
+              className="text-sm text-gray-400 hover:text-white transition-colors"
+            >
+              Ver todas →
+            </button>
           </div>
-          <MusicGrid musicas={favorites} loading={loading} />
+          <MusicGrid musicas={favorites.slice(0, 6)} loading={loading} />
         </section>
       )}
 
-      {/* Seção Recomendações */}
-      <section>
-        <div className="flex items-center gap-2 mb-5">
-          <div className="p-2 rounded-xl bg-gradient-to-r from-purple-500/20 to-pink-500/20">
-            <TrendingUp size={20} className="text-purple-400" />
+      {/* SEÇÃO TOP DA SEMANA */}
+      {weeklyTop.length > 0 && (
+        <section>
+          <div className="flex items-center gap-2 mb-5">
+            <div className="p-2 rounded-xl bg-gradient-to-r from-yellow-500/20 to-orange-500/20">
+              <Trophy size={20} className="text-yellow-400" />
+            </div>
+            <h2 className="text-xl md:text-2xl font-bold text-white">Top da Semana</h2>
+            <span className="text-xs text-gray-500">Mais ouvidos</span>
           </div>
-          <h2 className="text-xl md:text-2xl font-bold text-white">Recomendadas para Você</h2>
+          <MusicGrid musicas={weeklyTop} loading={loading} variant="compact" />
+        </section>
+      )}
+
+      {/* SEÇÃO RECOMENDAÇÕES PERSONALIZADAS */}
+      <section>
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-2">
+            <div className="p-2 rounded-xl bg-gradient-to-r from-purple-500/20 to-pink-500/20">
+              <TrendingUp size={20} className="text-purple-400" />
+            </div>
+            <h2 className="text-xl md:text-2xl font-bold text-white">
+              {user ? 'Recomendadas para Você' : 'Músicas em Alta'}
+            </h2>
+          </div>
+          <button 
+            onClick={handleRefreshRecommendations}
+            className="flex items-center gap-1 text-sm text-gray-400 hover:text-purple-400 transition-colors group"
+            title="Atualizar recomendações"
+          >
+            <RefreshCw size={14} className="group-hover:rotate-180 transition-transform duration-500" />
+            <span>Atualizar</span>
+          </button>
         </div>
-        <MusicGrid musicas={recommendations} loading={loading} />
+        
+        {recommendations.length > 0 ? (
+          <MusicGrid musicas={recommendations} loading={loading} />
+        ) : (
+          <div className="glass rounded-2xl p-8 text-center">
+            <Sparkles size={32} className="text-gray-500 mx-auto mb-3" />
+            <p className="text-gray-400">
+              {user 
+                ? 'Toque algumas músicas para receber recomendações personalizadas!' 
+                : 'Faça login para receber recomendações personalizadas!'}
+            </p>
+          </div>
+        )}
       </section>
 
-      {/* Seção Lançamentos */}
-      <section>
-        <div className="flex items-center gap-2 mb-5">
-          <div className="p-2 rounded-xl bg-gradient-to-r from-green-500/20 to-emerald-500/20">
-            <Clock size={20} className="text-green-400" />
+      {/* SEÇÃO LANÇAMENTOS */}
+      {recentSongs.length > 0 && (
+        <section>
+          <div className="flex items-center gap-2 mb-5">
+            <div className="p-2 rounded-xl bg-gradient-to-r from-green-500/20 to-emerald-500/20">
+              <Calendar size={20} className="text-green-400" />
+            </div>
+            <h2 className="text-xl md:text-2xl font-bold text-white">Lançamentos</h2>
           </div>
-          <h2 className="text-xl md:text-2xl font-bold text-white">Lançamentos</h2>
-        </div>
-        <MusicGrid musicas={recentSongs} loading={loading} />
-      </section>
+          <MusicGrid musicas={recentSongs} loading={loading} />
+        </section>
+      )}
 
-      {/* Call to Action */}
+      {/* CALL TO ACTION */}
       <div className="glass rounded-2xl p-6 md:p-8 text-center">
-        <Headphones size={40} className="text-purple-400 mx-auto mb-4" />
+        <div className="w-16 h-16 bg-gradient-to-r from-purple-500 to-pink-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+          <Headphones size={32} className="text-white" />
+        </div>
         <h3 className="text-xl md:text-2xl font-bold text-white mb-2">
           Descubra novas músicas
         </h3>
@@ -137,7 +324,7 @@ export default function HomePage() {
         </p>
         <button 
           onClick={() => window.location.href = '/explore'}
-          className="bg-gradient-to-r from-purple-500 to-pink-500 px-6 py-2 rounded-full font-semibold hover:scale-105 transition-transform inline-flex items-center gap-2"
+          className="bg-gradient-to-r from-purple-500 to-pink-500 px-6 py-2.5 rounded-full font-semibold hover:scale-105 transition-transform inline-flex items-center gap-2 shadow-lg"
         >
           Explorar Agora
         </button>
