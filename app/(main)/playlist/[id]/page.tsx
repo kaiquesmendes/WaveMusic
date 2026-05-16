@@ -47,10 +47,13 @@ export default function PlaylistPage() {
         setPlaylist(playlistData)
       }
 
-      // Buscar músicas da playlist - VERSÃO CORRIGIDA
+      // Buscar músicas da playlist usando join
       const { data: playlistMusicas, error: musicasError } = await supabase
         .from('playlist_musicas')
-        .select('musica_id, ordem')
+        .select(`
+          ordem,
+          musicas:musica_id (*)
+        `)
         .eq('playlist_id', id)
         .order('ordem', { ascending: true })
 
@@ -61,28 +64,10 @@ export default function PlaylistPage() {
       }
 
       if (playlistMusicas && playlistMusicas.length > 0) {
-        // Buscar os detalhes de cada música
-        const musicasIds = playlistMusicas.map(pm => pm.musica_id)
-        
-        const { data: musicasData, error: musicDetailsError } = await supabase
-          .from('musicas')
-          .select('*')
-          .in('id', musicasIds)
-
-        if (musicDetailsError) {
-          console.error('Erro ao buscar detalhes:', musicDetailsError)
-          setMusicas([])
-          return
-        }
-
-        if (musicasData) {
-          // Manter a ordem correta
-          const orderedMusicas = playlistMusicas.map(pm => 
-            musicasData.find(m => m.id === pm.musica_id)
-          ).filter(Boolean) as Musica[]
-          
-          setMusicas(orderedMusicas)
-        }
+        const musicasList = playlistMusicas
+          .map(item => (item as any).musicas)
+          .filter((m): m is Musica => m !== null)
+        setMusicas(musicasList)
       } else {
         setMusicas([])
       }
