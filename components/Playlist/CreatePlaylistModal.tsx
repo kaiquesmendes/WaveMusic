@@ -33,7 +33,10 @@ export function CreatePlaylistModal({ isOpen, onClose }: CreatePlaylistModalProp
     setLoading(true)
     setError('')
 
-    const { data, error } = await supabase
+    // Usar any para evitar erro de tipo
+    const supabaseAny = supabase as any
+    
+    const { data, error } = await supabaseAny
       .from('playlists')
       .insert({
         nome: nome.trim(),
