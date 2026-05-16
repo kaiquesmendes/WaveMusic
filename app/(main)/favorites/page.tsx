@@ -13,18 +13,31 @@ export default function FavoritesPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (user) {
+    if (user?.id) {
       fetchFavorites()
+    } else {
+      setLoading(false)
     }
   }, [user])
 
   async function fetchFavorites() {
+    if (!user?.id) {
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('favoritos')
       .select('musica:musica_id(*)')
-      .eq('usuario_id', user?.id)
+      .eq('usuario_id', user.id)
       .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Erro ao buscar favoritos:', error)
+      setLoading(false)
+      return
+    }
 
     if (data) {
       const musicas = data.map(item => item.musica as unknown as Musica)

@@ -18,24 +18,31 @@ export default function LibraryPage() {
   const [isModalOpen, setIsModalOpen] = useState(false)
 
   useEffect(() => {
-    if (user) {
+    if (user?.id) {
       fetchUserData()
+    } else {
+      setLoading(false)
     }
   }, [user])
 
   async function fetchUserData() {
+    if (!user?.id) {
+      setLoading(false)
+      return
+    }
+
     // Fetch playlists
     const { data: playlistsData } = await supabase
       .from('playlists')
       .select('*')
-      .eq('usuario_id', user?.id)
+      .eq('usuario_id', user.id)
       .order('created_at', { ascending: false })
 
     // Fetch favorites with music details
     const { data: favoritesData } = await supabase
       .from('favoritos')
       .select('musica:musica_id(*)')
-      .eq('usuario_id', user?.id)
+      .eq('usuario_id', user.id)
       .order('created_at', { ascending: false })
       .limit(5)
 
