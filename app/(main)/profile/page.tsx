@@ -294,83 +294,84 @@ export default function ProfilePage() {
   return (
     <div className="min-h-screen pb-20 animate-fade-in">
       {/* Hero Section com Gradiente e Avatar Central */}
-      <div className="relative h-64 md:h-80 rounded-2xl overflow-hidden mb-20 group">
-        <div className={`absolute inset-0 bg-gradient-to-r ${getLevelColor()} animate-gradient bg-[length:200%_200%]`} />
-        <div className="absolute inset-0 bg-black/30 group-hover:bg-black/20 transition-all duration-500" />
-        
-        {/* Nível */}
-        <div className="absolute top-4 right-4 glass rounded-full px-4 py-2 flex items-center gap-2 z-10">
-          <Award size={16} className="text-yellow-400" />
-          <span className="text-sm font-medium text-white">{stats.listeningLevel}</span>
-        </div>
-        
-        {/* Avatar Container */}
-        <div className="absolute -bottom-16 left-1/2 transform -translate-x-1/2">
-          <div className="relative group/avatar">
-            <div className="relative w-32 h-32 md:w-36 md:h-36 rounded-full overflow-hidden border-4 border-white shadow-2xl transition-all duration-300 group-hover/avatar:scale-105">
-              {avatarUrl ? (
-                <Image src={avatarUrl} alt={nome} fill className="object-cover" />
-              ) : (
-                <div className="w-full h-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
-                  <User size={48} className="text-white" />
-                </div>
-              )}
-            </div>
-            {isEditing && (
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="absolute bottom-2 right-2 p-2 bg-black/70 rounded-full hover:bg-black transition-all duration-300 hover:scale-110"
-                disabled={uploading}
-              >
-                {uploading ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Camera size={14} className="text-white" />
-                )}
-              </button>
-            )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleAvatarUpload}
-              className="hidden"
-            />
+      {/* Hero Section com Gradiente e Avatar Central - VERSÃO CORRIGIDA */}
+<div className="relative h-40 md:h-52 rounded-2xl overflow-hidden mb-20 group">
+  <div className={`absolute inset-0 bg-gradient-to-r ${getLevelColor()} animate-gradient bg-[length:200%_200%]`} />
+  <div className="absolute inset-0 bg-black/30 group-hover:bg-black/20 transition-all duration-500" />
+  
+  {/* Nível */}
+  <div className="absolute top-3 right-3 glass rounded-full px-3 py-1 flex items-center gap-1.5 z-10">
+    <Award size={12} className="text-yellow-400" />
+    <span className="text-xs font-medium text-white">{stats.listeningLevel}</span>
+  </div>
+  
+  {/* Avatar Container - Corrigido para não cortar */}
+  <div className="absolute -bottom-10 left-1/2 transform -translate-x-1/2">
+    <div className="relative group/avatar">
+      <div className="relative w-20 h-20 md:w-24 md:h-24 rounded-full overflow-hidden border-3 border-white shadow-2xl transition-all duration-300 group-hover/avatar:scale-105">
+        {avatarUrl ? (
+          <Image src={avatarUrl} alt={nome} fill className="object-cover" />
+        ) : (
+          <div className="w-full h-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+            <User size={32} className="text-white" />
           </div>
-        </div>
-
-        {/* Decorative Elements */}
-        <div className="absolute top-4 left-4 opacity-10 group-hover:opacity-20 transition-opacity duration-500">
-          <Headphones size={60} />
-        </div>
-        <div className="absolute bottom-4 right-4 opacity-10 group-hover:opacity-20 transition-opacity duration-500">
-          <Music size={50} />
-        </div>
+        )}
       </div>
-
-      {/* Profile Content */}
-      <div className="max-w-4xl mx-auto px-4 space-y-8">
-        {/* Header Info */}
-        <div className="text-center mt-8">
-          {isEditing ? (
-            <input
-              type="text"
-              value={nome}
-              onChange={(e) => setNome(e.target.value)}
-              className="text-2xl md:text-3xl font-bold bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white text-center focus:outline-none focus:border-purple-500 transition-all"
-              placeholder="Seu nome"
-            />
+      {isEditing && (
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="absolute bottom-0 right-0 p-1 bg-black/70 rounded-full hover:bg-black transition-all duration-300 hover:scale-110"
+          disabled={uploading}
+        >
+          {uploading ? (
+            <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
           ) : (
-            <h1 className="text-2xl md:text-3xl font-bold text-white flex items-center justify-center gap-2">
-              {nome || user?.email?.split('@')[0]}
-              {stats.totalHours >= 50 && <Trophy size={20} className="text-yellow-400" />}
-            </h1>
+            <Camera size={10} className="text-white" />
           )}
-          <p className="text-gray-400 text-sm mt-2 flex items-center justify-center gap-2">
-            <Shield size={14} />
-            Membro desde {new Date(user?.created_at || '').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
-          </p>
-        </div>
+        </button>
+      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleAvatarUpload}
+        className="hidden"
+      />
+    </div>
+  </div>
+
+  {/* Decorative Elements */}
+  <div className="absolute top-3 left-3 opacity-10 group-hover:opacity-20 transition-opacity duration-500">
+    <Headphones size={40} />
+  </div>
+  <div className="absolute bottom-3 right-3 opacity-10 group-hover:opacity-20 transition-opacity duration-500">
+    <Music size={35} />
+  </div>
+</div>
+
+{/* Profile Content */}
+<div className="max-w-4xl mx-auto px-4 space-y-8">
+  {/* Header Info */}
+  <div className="text-center mt-8">
+    {isEditing ? (
+      <input
+        type="text"
+        value={nome}
+        onChange={(e) => setNome(e.target.value)}
+        className="text-xl md:text-2xl font-bold bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white text-center focus:outline-none focus:border-purple-500 transition-all"
+        placeholder="Seu nome"
+      />
+    ) : (
+      <h1 className="text-xl md:text-2xl font-bold text-white flex items-center justify-center gap-2">
+        {nome || user?.email?.split('@')[0]}
+        {stats.totalHours >= 50 && <Trophy size={18} className="text-yellow-400" />}
+      </h1>
+    )}
+    <p className="text-gray-400 text-xs mt-1 flex items-center justify-center gap-2">
+      <Shield size={12} />
+      Membro desde {new Date(user?.created_at || '').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+    </p>
+  </div>
 
         {/* Level Progress Bar */}
         <div className="glass rounded-2xl p-6">
