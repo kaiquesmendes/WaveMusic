@@ -325,36 +325,33 @@ export default function ExplorePage() {
     )
   }
 
-  // Modo de busca
-  if (searchMode) {
-    return (
-      <div className="space-y-6 animate-fade-in pb-20">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Compass size={28} className="text-purple-400" />
-            <h1 className="text-3xl font-bold text-white">
-              Resultados para "{searchQuery}"
-            </h1>
-          </div>
-          <button 
-            onClick={backToExplore}
-            className="text-gray-400 hover:text-white transition-colors"
-          >
-            Limpar
-          </button>
+// Modo de busca - SEM barra de pesquisa duplicada
+if (searchMode) {
+  return (
+    <div className="space-y-6 animate-fade-in pb-20">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Compass size={28} className="text-purple-400" />
+          <h1 className="text-3xl font-bold text-white">
+            Resultados para "{searchQuery}"
+          </h1>
         </div>
-        
-        <SearchBar onSearch={handleSearch} initialValue={searchQuery} />
-        
-        <div className="text-sm text-gray-400 mb-4">
-          {filteredMusicas.length} músicas encontradas
-        </div>
-        
-        <MusicGrid musicas={filteredMusicas} />
+        <button 
+          onClick={backToExplore}
+          className="text-gray-400 hover:text-white transition-colors"
+        >
+          Limpar
+        </button>
       </div>
-    )
-  }
-
+      
+      <div className="text-sm text-gray-400 mb-4">
+        {filteredMusicas.length} músicas encontradas
+      </div>
+      
+      <MusicGrid musicas={filteredMusicas} />
+    </div>
+  )
+}
   // Página principal do Explorar
   return (
     <div className="space-y-10 animate-fade-in pb-20">
