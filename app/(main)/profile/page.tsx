@@ -27,6 +27,13 @@ import {
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 
+// Interface para o update do usuário
+interface UsuarioUpdate {
+  nome?: string
+  avatar_url?: string
+  updated_at?: string
+}
+
 export default function ProfilePage() {
   const { user, userData, refreshUser } = useAuth()
   const [isEditing, setIsEditing] = useState(false)
@@ -168,64 +175,80 @@ export default function ProfilePage() {
     }
   }
 
-async function handleAvatarUpload(event: React.ChangeEvent<HTMLInputElement>) {
-  const file = event.target.files?.[0]
-  if (!file || !user) return
+  async function handleAvatarUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file || !user) return
 
-  setUploading(true)
-  const fileExt = file.name.split('.').pop()
-  const fileName = `${user.id}-${Date.now()}.${fileExt}`
-  const filePath = `avatars/${fileName}`
+    setUploading(true)
+    const fileExt = file.name.split('.').pop()
+    const fileName = `${user.id}-${Date.now()}.${fileExt}`
+    const filePath = `avatars/${fileName}`
 
-  const { error: uploadError } = await supabase.storage
-    .from('avatars')
-    .upload(filePath, file)
+    const { error: uploadError } = await supabase.storage
+      .from('avatars')
+      .upload(filePath, file)
 
-  if (uploadError) {
-    console.error('Erro ao fazer upload:', uploadError)
+    if (uploadError) {
+      console.error('Erro ao fazer upload:', uploadError)
+      setUploading(false)
+      return
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('avatars')
+      .getPublicUrl(filePath)
+
+    const updateData: UsuarioUpdate = {
+      avatar_url: publicUrl
+    }
+
+    const { error: updateError } = await supabase
+      .from('usuarios')
+      .update(updateData)
+      .eq('id', user.id)
+
+    if (!updateError) {
+      setAvatarUrl(publicUrl)
+      await refreshUser()
+    }
     setUploading(false)
-    return
   }
 
-  const { data: { publicUrl } } = supabase.storage
-    .from('avatars')
-    .getPublicUrl(filePath)
+  const handleSave = async () => {
+    if (!user) return
+    setLoading(true)
 
-  // Usar as any para resolver o erro de tipo
-  const { error: updateError } = await supabase
-    .from('usuarios')
-    .update({ avatar_url: publicUrl } as any)
-    .eq('id', user.id)
+    const updateData: UsuarioUpdate = {
+      nome: nome,
+      avatar_url: avatarUrl,
+      updated_at: new Date().toISOString()
+    }
 
-  if (!updateError) {
-    setAvatarUrl(publicUrl)
-    await refreshUser()
+    const { error } = await supabase
+      .from('usuarios')
+      .update(updateData)
+      .eq('id', user.id)
+
+    if (!error) {
+      await refreshUser()
+      setIsEditing(false)
+    }
+    setLoading(false)
   }
-  setUploading(false)
-}
 
-const handleSave = async () => {
-  if (!user) return
-  setLoading(true)
-
-  const { error } = await supabase
-    .from('usuarios')
-    .update({ 
-      nome, 
-      avatar_url: avatarUrl, 
-      updated_at: new Date().toISOString() 
-    } as any)
-    .eq('id', user.id)
-
-  if (!error) {
-    await refreshUser()
-    setIsEditing(false)
-  }
-  setLoading(false)
-}
   const handleLogout = async () => {
     await supabase.auth.signOut()
     router.push('/login')
+  }
+
+  // Função para obter a cor do nível
+  const getLevelColor = () => {
+    const level = stats.listeningLevel
+    if (level.includes('Lendário')) return 'text-yellow-400'
+    if (level.includes('Expert')) return 'text-purple-400'
+    if (level.includes('Avançado')) return 'text-blue-400'
+    if (level.includes('Intermediário')) return 'text-green-400'
+    return 'text-gray-400'
   }
 
   return (
@@ -238,7 +261,7 @@ const handleSave = async () => {
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-500">
           <div className="text-center">
             <Sparkles className="w-12 h-12 text-white mx-auto mb-2" />
-            <p className="text-white font-medium">Nível: {stats.listeningLevel}</p>
+            <p className={`font-medium ${getLevelColor()}`}>{stats.listeningLevel}</p>
           </div>
         </div>
         
@@ -509,8 +532,15 @@ function ListMusic(props: any) {
   )
 }
 
-function StatCard({ icon, value, label, color, onClick, suffix = '' }: any) {
-  const colors = {
+function StatCard({ icon, value, label, color, onClick, suffix = '' }: { 
+  icon: React.ReactNode, 
+  value: number, 
+  label: string, 
+  color: string, 
+  onClick?: () => void, 
+  suffix?: string 
+}) {
+  const colorClasses = {
     purple: 'bg-purple-500/20 group-hover:bg-purple-500/30 text-purple-400',
     pink: 'bg-pink-500/20 group-hover:bg-pink-500/30 text-pink-400',
     green: 'bg-green-500/20 group-hover:bg-green-500/30 text-green-400',
@@ -522,7 +552,7 @@ function StatCard({ icon, value, label, color, onClick, suffix = '' }: any) {
       className="glass rounded-2xl p-5 text-center group hover:scale-105 transition-all duration-300 cursor-pointer"
       onClick={onClick}
     >
-      <div className={`w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-3 transition-all duration-300 ${colors[color]}`}>
+      <div className={`w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-3 transition-all duration-300 ${colorClasses[color as keyof typeof colorClasses]}`}>
         {icon}
       </div>
       <div className="text-2xl font-bold text-white">
