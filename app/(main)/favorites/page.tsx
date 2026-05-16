@@ -5,7 +5,11 @@ import { MusicList } from '@/components/Music/MusicList'
 import { supabase } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/hooks/useAuth'
 import { Musica } from '@/types'
-import { Heart, Music } from 'lucide-react'
+import { Heart } from 'lucide-react'
+
+interface FavoritoResponse {
+  musica: Musica
+}
 
 export default function FavoritesPage() {
   const { user } = useAuth()
@@ -27,23 +31,53 @@ export default function FavoritesPage() {
     }
 
     setLoading(true)
-    const { data, error } = await supabase
-      .from('favoritos')
-      .select('musica:musica_id(*)')
-      .eq('usuario_id', user.id)
-      .order('created_at', { ascending: false })
+    
+    try {
+      // Primeiro, buscar os IDs das músicas favoritas
+      const { data: favoritosData, error: favoritosError } = await supabase
+        .from('favoritos')
+        .select('musica_id')
+        .eq('usuario_id', user.id)
+        .order('created_at', { ascending: false })
 
-    if (error) {
-      console.error('Erro ao buscar favoritos:', error)
+      if (favoritosError) {
+        console.error('Erro ao buscar favoritos:', favoritosError)
+        setLoading(false)
+        return
+      }
+
+      if (!favoritosData || favoritosData.length === 0) {
+        setFavorites([])
+        setLoading(false)
+        return
+      }
+
+      // Buscar os detalhes das músicas
+      const musicasIds = favoritosData.map(f => f.musica_id)
+      
+      const { data: musicasData, error: musicasError } = await supabase
+        .from('musicas')
+        .select('*')
+        .in('id', musicasIds)
+
+      if (musicasError) {
+        console.error('Erro ao buscar detalhes das músicas:', musicasError)
+        setLoading(false)
+        return
+      }
+
+      if (musicasData) {
+        // Manter a ordem correta
+        const orderedMusicas = favoritosData
+          .map(fav => musicasData.find(m => m.id === fav.musica_id))
+          .filter((m): m is Musica => m !== undefined)
+        setFavorites(orderedMusicas)
+      }
+    } catch (error) {
+      console.error('Erro inesperado:', error)
+    } finally {
       setLoading(false)
-      return
     }
-
-    if (data) {
-      const musicas = data.map(item => item.musica as unknown as Musica)
-      setFavorites(musicas.filter(m => m !== null))
-    }
-    setLoading(false)
   }
 
   if (loading) {
