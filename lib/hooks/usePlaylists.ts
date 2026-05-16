@@ -11,17 +11,33 @@ export function usePlaylists() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (user) {
+    if (user?.id) {
       fetchPlaylists()
+    } else {
+      setLoading(false)
     }
   }, [user])
 
   async function fetchPlaylists() {
-    const { data } = await supabase
+    if (!user?.id) {
+      setLoading(false)
+      return
+    }
+
+    // Usar any para evitar erro de tipo
+    const supabaseAny = supabase as any
+    
+    const { data, error } = await supabaseAny
       .from('playlists')
       .select('*')
-      .eq('usuario_id', user?.id)
+      .eq('usuario_id', user.id)
       .order('created_at', { ascending: false })
+    
+    if (error) {
+      console.error('Erro ao buscar playlists:', error)
+      setLoading(false)
+      return
+    }
     
     if (data) {
       setPlaylists(data)
@@ -32,11 +48,14 @@ export function usePlaylists() {
   async function createPlaylist(nome: string, descricao?: string) {
     if (!user) return null
 
-    const { data, error } = await supabase
+    // Usar any para evitar erro de tipo
+    const supabaseAny = supabase as any
+    
+    const { data, error } = await supabaseAny
       .from('playlists')
       .insert({
         nome,
-        descricao,
+        descricao: descricao || null,
         usuario_id: user.id,
       })
       .select()
@@ -50,11 +69,16 @@ export function usePlaylists() {
   }
 
   async function deletePlaylist(id: string) {
-    const { error } = await supabase
+    if (!user) return
+
+    // Usar any para evitar erro de tipo
+    const supabaseAny = supabase as any
+    
+    const { error } = await supabaseAny
       .from('playlists')
       .delete()
       .eq('id', id)
-      .eq('usuario_id', user?.id)
+      .eq('usuario_id', user.id)
 
     if (!error) {
       setPlaylists(prev => prev.filter(p => p.id !== id))
