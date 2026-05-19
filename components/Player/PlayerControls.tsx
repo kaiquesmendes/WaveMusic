@@ -18,17 +18,26 @@ export function PlayerControls() {
     playRandomSong
   } = usePlayerStore()
 
+  const handleGlobalShuffle = () => {
+    if (!isGlobalShuffle) {
+      toggleGlobalShuffle()
+      playRandomSong()
+    } else {
+      toggleGlobalShuffle()
+    }
+  }
+
   return (
-    <div className="flex items-center justify-center gap-2 md:gap-4">
-      {/* Modo Aleatório Global (Todas as músicas do site) */}
+    <div className="flex items-center justify-center gap-2 md:gap-3">
+      {/* Modo Aleatório Global */}
       <button
-        onClick={toggleGlobalShuffle}
+        onClick={handleGlobalShuffle}
         className={`p-2 rounded-full transition-all duration-300 ${
           isGlobalShuffle 
             ? 'text-purple-400 bg-purple-500/20 shadow-lg shadow-purple-500/20' 
             : 'text-gray-400 hover:text-white hover:bg-white/10'
         }`}
-        title="Modo aleatório global - toca todas as músicas do site"
+        title="Modo aleatório - tocar todas as músicas do site"
       >
         <Radio size={18} />
       </button>
@@ -46,16 +55,14 @@ export function PlayerControls() {
         <Shuffle size={18} />
       </button>
       
-      {/* Anterior */}
       <button
         onClick={previousSong}
         className="p-2 rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-all duration-300"
-        title="Música anterior"
+        title="Anterior"
       >
         <SkipBack size={20} />
       </button>
       
-      {/* Play/Pause */}
       <button
         onClick={togglePlay}
         className="bg-white text-black rounded-full p-3 hover:scale-105 transition-all duration-300 shadow-lg"
@@ -64,16 +71,14 @@ export function PlayerControls() {
         {isPlaying ? <Pause size={20} /> : <Play size={20} className="ml-0.5" />}
       </button>
       
-      {/* Próxima */}
       <button
         onClick={nextSong}
         className="p-2 rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-all duration-300"
-        title="Próxima música"
+        title="Próxima"
       >
         <SkipForward size={20} />
       </button>
       
-      {/* Repetir */}
       <button
         onClick={toggleRepeat}
         className={`p-2 rounded-full transition-all duration-300 ${

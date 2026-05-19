@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import { Search, X, Loader2, Play, Mic2, Album, Disc3 } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { Search, X, Loader2, Play, Mic2, Disc3 } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { Musica } from '@/types'
 import Image from 'next/image'
@@ -14,21 +14,48 @@ interface SearchBarProps {
   onResultClick?: (music: Musica) => void
 }
 
+interface ArtistaResult {
+  artista: string
+  url_capa: string | null
+}
+
+interface AlbumResult {
+  album: string
+  artista: string
+  url_capa: string | null
+}
+
+// Cache de resultados de busca (opcional, para melhor performance)
+const searchCache = new Map<string, { data: any; timestamp: number }>()
+const CACHE_DURATION = 30 * 1000 // 30 segundos
+
 export function SearchBar({ onSearch, initialValue = '', onResultClick }: SearchBarProps) {
   const [query, setQuery] = useState(initialValue)
   const [results, setResults] = useState<Musica[]>([])
-  const [artistasResults, setArtistasResults] = useState<any[]>([])
-  const [albunsResults, setAlbunsResults] = useState<any[]>([])
+  const [artistasResults, setArtistasResults] = useState<ArtistaResult[]>([])
+  const [albunsResults, setAlbunsResults] = useState<AlbumResult[]>([])
   const [isOpen, setIsOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
+  const debounceRef = useRef<NodeJS.Timeout>()
+  const isMountedRef = useRef(true)
   const { setCurrentSong } = usePlayerStore()
   const router = useRouter()
+
+  // Limpar cache quando o componente desmontar (opcional)
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     setQuery(initialValue)
   }, [initialValue])
 
+  // Click outside handler - memoizado
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
@@ -39,98 +66,157 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  useEffect(() => {
-    const searchAll = async () => {
-      if (query.length < 2) {
-        setResults([])
-        setArtistasResults([])
-        setAlbunsResults([])
-        return
-      }
+  // Função de busca principal - memoizada
+  const searchAll = useCallback(async (searchQuery: string) => {
+    if (searchQuery.length < 2) {
+      setResults([])
+      setArtistasResults([])
+      setAlbunsResults([])
+      return
+    }
 
-      setLoading(true)
-      const supabaseAny = supabase as any
-      
-      const { data: musicasData } = await supabaseAny
-        .from('musicas')
-        .select('*')
-        .or(`titulo.ilike.%${query}%,artista.ilike.%${query}%,genero.ilike.%${query}%,album.ilike.%${query}%`)
-        .limit(5)
-      
-      const { data: artistasData } = await supabaseAny
-        .from('musicas')
-        .select('artista, url_capa')
-        .ilike('artista', `%${query}%`)
-        .limit(5)
-      
-      const { data: albunsData } = await supabaseAny
-        .from('musicas')
-        .select('album, artista, url_capa')
-        .not('album', 'is', null)
-        .ilike('album', `%${query}%`)
-        .limit(5)
-      
-      if (musicasData) setResults(musicasData)
+    // Verificar cache
+    const cached = searchCache.get(searchQuery)
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+      setResults(cached.data.results)
+      setArtistasResults(cached.data.artistasResults)
+      setAlbunsResults(cached.data.albunsResults)
+      setIsOpen(true)
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
+    const supabaseAny = supabase as any
+    
+    try {
+      // Executar queries em paralelo para melhor performance
+      const [musicasPromise, artistasPromise, albunsPromise] = await Promise.allSettled([
+        supabaseAny
+          .from('musicas')
+          .select('*')
+          .or(`titulo.ilike.%${searchQuery}%,artista.ilike.%${searchQuery}%,genero.ilike.%${searchQuery}%,album.ilike.%${searchQuery}%`)
+          .limit(5),
+        supabaseAny
+          .from('musicas')
+          .select('artista, url_capa')
+          .ilike('artista', `%${searchQuery}%`)
+          .limit(5),
+        supabaseAny
+          .from('musicas')
+          .select('album, artista, url_capa')
+          .not('album', 'is', null)
+          .ilike('album', `%${searchQuery}%`)
+          .limit(5)
+      ])
+
+      let musicasData = null
+      let artistasData = null
+      let albunsData = null
+
+      if (musicasPromise.status === 'fulfilled') musicasData = musicasPromise.value.data
+      if (artistasPromise.status === 'fulfilled') artistasData = artistasPromise.value.data
+      if (albunsPromise.status === 'fulfilled') albunsData = albunsPromise.value.data
+
+      // Processar resultados
+      let resultsList: Musica[] = []
+      let artistasList: ArtistaResult[] = []
+      let albunsList: AlbumResult[] = []
+
+      if (musicasData) resultsList = musicasData
       
       if (artistasData) {
         const uniqueArtistas = Array.from(
-          new Map(artistasData.map((a: any) => [a.artista, a])).values()
+          new Map(artistasData.map((a: ArtistaResult) => [a.artista, a])).values()
         )
-        setArtistasResults(uniqueArtistas.slice(0, 3))
+        artistasList = uniqueArtistas.slice(0, 3)
       }
       
       if (albunsData) {
         const uniqueAlbuns = Array.from(
-          new Map(albunsData.map((a: any) => [a.album, a])).values()
+          new Map(albunsData.map((a: AlbumResult) => [a.album, a])).values()
         )
-        setAlbunsResults(uniqueAlbuns.slice(0, 3))
+        albunsList = uniqueAlbuns.slice(0, 3)
       }
-      
-      setIsOpen(true)
-      setLoading(false)
+
+      // Salvar no cache
+      searchCache.set(searchQuery, {
+        data: { results: resultsList, artistasResults: artistasList, albunsResults: albunsList },
+        timestamp: Date.now()
+      })
+
+      if (isMountedRef.current) {
+        setResults(resultsList)
+        setArtistasResults(artistasList)
+        setAlbunsResults(albunsList)
+        setIsOpen(true)
+      }
+    } catch (error) {
+      console.error('Erro na busca:', error)
+    } finally {
+      if (isMountedRef.current) setLoading(false)
     }
+  }, [])
 
-    const debounce = setTimeout(searchAll, 300)
-    return () => clearTimeout(debounce)
-  }, [query])
+  // Debounce da busca
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    
+    debounceRef.current = setTimeout(() => {
+      searchAll(query)
+    }, 300)
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [query, searchAll])
+
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value
     setQuery(value)
     if (onSearch) onSearch(value)
-  }
+  }, [onSearch])
 
-  const handleClear = () => {
+  const handleClear = useCallback(() => {
     setQuery('')
     setResults([])
     setArtistasResults([])
     setAlbunsResults([])
     setIsOpen(false)
     if (onSearch) onSearch('')
-  }
+  }, [onSearch])
 
-  const handleMusicClick = (music: Musica) => {
+  const handleMusicClick = useCallback((music: Musica) => {
     setCurrentSong(music)
     setIsOpen(false)
     setQuery('')
     if (onResultClick) onResultClick(music)
-  }
+  }, [setCurrentSong, onResultClick])
 
-  const handleArtistaClick = (artista: string) => {
+  const handleArtistaClick = useCallback((artista: string) => {
     setIsOpen(false)
     setQuery('')
-    // Navegar para a página do artista no explorador
     router.push(`/explore?artista=${encodeURIComponent(artista)}`)
-  }
+  }, [router])
 
-  const handleAlbumClick = (album: string, artista: string) => {
+  const handleAlbumClick = useCallback((album: string, artista: string) => {
     setIsOpen(false)
     setQuery('')
-    // Navegar para a página do álbum no explorador
     router.push(`/explore?album=${encodeURIComponent(album)}&artista=${encodeURIComponent(artista)}`)
-  }
+  }, [router])
 
-  const hasResults = results.length > 0 || artistasResults.length > 0 || albunsResults.length > 0
+  const hasResults = useMemo(() => 
+    results.length > 0 || artistasResults.length > 0 || albunsResults.length > 0
+  , [results.length, artistasResults.length, albunsResults.length])
+
+  // Componente de ícone de música memoizado
+  const MusicIcon = useCallback((props: any) => (
+    <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M9 18V5l12-2v13" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="16" r="3" />
+    </svg>
+  ), [])
 
   return (
     <div ref={searchRef} className="relative w-full md:w-96">
@@ -143,18 +229,23 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
           onFocus={() => hasResults && setIsOpen(true)}
           placeholder="Buscar músicas, artistas, álbuns..."
           className="w-full pl-10 pr-10 py-2.5 bg-white/10 border border-white/20 rounded-xl focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all text-white placeholder:text-gray-500"
+          aria-label="Buscar"
         />
         {loading && (
           <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 animate-spin" />
         )}
         {query && !loading && (
-          <button onClick={handleClear} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg hover:bg-white/10 transition-colors">
+          <button 
+            onClick={handleClear} 
+            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg hover:bg-white/10 transition-colors"
+            aria-label="Limpar busca"
+          >
             <X size={14} className="text-gray-400 hover:text-white" />
           </button>
         )}
       </div>
 
-      {/* Search Results Dropdown - Fundo OPACO corrigido */}
+      {/* Search Results Dropdown */}
       {isOpen && hasResults && (
         <div className="absolute top-full left-0 right-0 mt-2 bg-black/95 backdrop-blur-xl rounded-xl border border-white/10 overflow-hidden z-50 animate-fade-in max-h-96 overflow-y-auto shadow-2xl">
           
@@ -168,7 +259,7 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
                 <button
                   key={artista.artista}
                   onClick={() => handleArtistaClick(artista.artista)}
-                  className="w-full flex items-center gap-3 p-2 hover:bg-white/10 rounded-lg transition-colors text-left"
+                  className="w-full flex items-center gap-3 p-2 hover:bg-white/10 rounded-lg transition-colors text-left group"
                 >
                   <div className="relative w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0">
                     {artista.url_capa ? (
@@ -196,7 +287,7 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
                 <button
                   key={album.album}
                   onClick={() => handleAlbumClick(album.album, album.artista)}
-                  className="w-full flex items-center gap-3 p-2 hover:bg-white/10 rounded-lg transition-colors text-left"
+                  className="w-full flex items-center gap-3 p-2 hover:bg-white/10 rounded-lg transition-colors text-left group"
                 >
                   <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0">
                     {album.url_capa ? (
@@ -230,7 +321,7 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
                     {music.url_capa ? (
                       <Image src={music.url_capa} alt={music.titulo} fill className="object-cover" />
                     ) : (
-                      <Music size={16} className="text-white" />
+                      <MusicIcon size={16} className="text-white" />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -261,16 +352,5 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
         </div>
       )}
     </div>
-  )
-}
-
-// Componente auxiliar
-function Music(props: any) {
-  return (
-    <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M9 18V5l12-2v13" />
-      <circle cx="6" cy="18" r="3" />
-      <circle cx="18" cy="16" r="3" />
-    </svg>
   )
 }

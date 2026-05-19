@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/hooks/useAuth'
 import { 
@@ -16,7 +16,6 @@ import {
   Shield,
   Headphones,
   Sparkles,
-  Camera,
   LogOut,
   ChevronRight,
   Trophy,
@@ -31,12 +30,21 @@ import {
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 
+// Cache do perfil
+const profileCache = {
+  data: null as any,
+  timestamp: 0,
+  expiryTime: 3 * 60 * 1000, // 3 minutos
+  isValid: () => Date.now() - profileCache.timestamp < profileCache.expiryTime
+}
+
 export default function ProfilePage() {
   const { user, userData, refreshUser } = useAuth()
   const [isEditing, setIsEditing] = useState(false)
   const [nome, setNome] = useState('')
   const [bio, setBio] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
   const [stats, setStats] = useState({ 
     playlists: 0, 
     favorites: 0, 
@@ -57,134 +65,206 @@ export default function ProfilePage() {
   const [topMusics, setTopMusics] = useState<any[]>([])
   const [bannerImage, setBannerImage] = useState('')
   const router = useRouter()
+  const isMountedRef = useRef(true)
+  const isFetchingRef = useRef(false)
 
-  useEffect(() => {
-    if (userData) {
-      setNome(userData.nome || '')
-      setBio(userData.bio || '')
-    }
-    if (user) {
-      fetchStats()
-      fetchRecentActivity()
-      fetchTopMusics()
-    }
-  }, [userData, user])
-
-  async function fetchStats() {
+  const fetchStats = useCallback(async (forceRefresh = false) => {
     if (!user) return
+
+    // Usar cache se válido
+    if (!forceRefresh && profileCache.isValid() && profileCache.data) {
+      setStats(profileCache.data.stats)
+      setBannerImage(profileCache.data.bannerImage)
+      setRecentActivities(profileCache.data.recentActivities || [])
+      setTopMusics(profileCache.data.topMusics || [])
+      setLoading(false)
+      return
+    }
+
+    if (isFetchingRef.current) return
+    isFetchingRef.current = true
 
     const supabaseAny = supabase as any
 
-    const [playlistsCount, favoritesCount, historyCount] = await Promise.all([
-      supabaseAny.from('playlists').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
-      supabaseAny.from('favoritos').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
-      supabaseAny.from('historico').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
-    ])
+    try {
+      // Executar queries em paralelo
+      const [playlistsCount, favoritesCount, historyCount, historyData] = await Promise.all([
+        supabaseAny.from('playlists').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
+        supabaseAny.from('favoritos').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
+        supabaseAny.from('historico').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id),
+        supabaseAny
+          .from('historico')
+          .select(`
+            musica:musica_id (*)
+          `)
+          .eq('usuario_id', user.id)
+          .limit(500)
+      ])
 
-    const { data: historyData } = await supabaseAny
-      .from('historico')
-      .select(`
-        musica:musica_id (*)
-      `)
-      .eq('usuario_id', user.id)
-      .limit(500)
-
-    const musicas = historyData?.map((item: any) => item.musica).filter(Boolean) || []
-    
-    const totalSeconds = musicas.reduce((acc: number, m: any) => acc + (m.duracao || 0), 0)
-    const totalMinutes = Math.floor(totalSeconds / 60)
-    const totalHours = Math.floor(totalMinutes / 60)
-    const totalSongs = musicas.length
-
-    const genreCount: Record<string, number> = {}
-    const artistCount: Record<string, number> = {}
-    const songCount: Record<string, { count: number; song: any }> = {}
-    
-    musicas.forEach((m: any) => {
-      if (m.genero && m.genero !== 'null' && m.genero !== '') {
-        genreCount[m.genero] = (genreCount[m.genero] || 0) + 1
-      }
-      if (m.artista && m.artista !== 'null' && m.artista !== '') {
-        artistCount[m.artista] = (artistCount[m.artista] || 0) + 1
-      }
-      if (m.id) {
-        if (!songCount[m.id]) {
-          songCount[m.id] = { count: 0, song: m }
-        }
-        songCount[m.id].count++
-      }
-    })
-    
-    const topGenreEntry = Object.entries(genreCount).sort((a, b) => b[1] - a[1])[0]
-    const topArtistEntry = Object.entries(artistCount).sort((a, b) => b[1] - a[1])[0]
-    const topSongEntry = Object.values(songCount).sort((a, b) => b.count - a.count)[0]
-    
-    const topGenre = topGenreEntry?.[0] || 'Nenhum ainda'
-    const topGenreCount = topGenreEntry?.[1] || 0
-    const favoriteArtist = topArtistEntry?.[0] || 'Nenhum ainda'
-    const favoriteArtistCount = topArtistEntry?.[1] || 0
-    const favoriteSong = topSongEntry?.song?.titulo || 'Nenhuma ainda'
-    const favoriteSongCount = topSongEntry?.count || 0
-    
-    // Definir banner baseado no artista favorito
-    if (favoriteArtist !== 'Nenhum ainda') {
-      const { data: artistaMusica } = await supabaseAny
-        .from('musicas')
-        .select('url_capa')
-        .eq('artista', favoriteArtist)
-        .not('url_capa', 'is', null)
-        .limit(1)
+      const musicas = historyData?.data?.map((item: any) => item.musica).filter(Boolean) || []
       
-      const bannerUrl = artistaMusica?.[0]?.url_capa || ''
-      setBannerImage(bannerUrl)
-    } else {
-      setBannerImage('')
-    }
-    
-    // Calcular nível
-    let listeningLevel = 'Iniciante'
-    let levelProgress = 0
-    
-    if (totalHours >= 100) {
-      listeningLevel = 'Lendário 🏆'
-      levelProgress = 100
-    } else if (totalHours >= 50) {
-      listeningLevel = 'Expert 🎖️'
-      levelProgress = ((totalHours - 50) / 50) * 100
-    } else if (totalHours >= 20) {
-      listeningLevel = 'Avançado 🌟'
-      levelProgress = ((totalHours - 20) / 30) * 100
-    } else if (totalHours >= 5) {
-      listeningLevel = 'Intermediário 🎵'
-      levelProgress = ((totalHours - 5) / 15) * 100
-    } else if (totalHours > 0) {
-      listeningLevel = 'Aprendiz 🎧'
-      levelProgress = (totalHours / 5) * 100
-    } else {
-      levelProgress = 0
-    }
-    
-    levelProgress = Math.min(Math.max(levelProgress, 0), 100)
+      const totalSeconds = musicas.reduce((acc: number, m: any) => acc + (m.duracao || 0), 0)
+      const totalMinutes = Math.floor(totalSeconds / 60)
+      const totalHours = Math.floor(totalMinutes / 60)
+      const totalSongs = musicas.length
 
-    setStats({
-      playlists: playlistsCount.count || 0,
-      favorites: favoritesCount.count || 0,
-      history: historyCount.count || 0,
-      totalMinutes,
-      totalHours,
-      totalSongs,
-      topGenre,
-      topGenreCount,
-      favoriteArtist,
-      favoriteArtistCount,
-      favoriteSong,
-      favoriteSongCount,
-      listeningLevel,
-      levelProgress
-    })
-  }
+      const genreCount: Record<string, number> = {}
+      const artistCount: Record<string, number> = {}
+      const songCount: Record<string, { count: number; song: any }> = {}
+      
+      musicas.forEach((m: any) => {
+        if (m.genero && m.genero !== 'null' && m.genero !== '') {
+          genreCount[m.genero] = (genreCount[m.genero] || 0) + 1
+        }
+        if (m.artista && m.artista !== 'null' && m.artista !== '') {
+          artistCount[m.artista] = (artistCount[m.artista] || 0) + 1
+        }
+        if (m.id) {
+          if (!songCount[m.id]) {
+            songCount[m.id] = { count: 0, song: m }
+          }
+          songCount[m.id].count++
+        }
+      })
+      
+      const topGenreEntry = Object.entries(genreCount).sort((a, b) => b[1] - a[1])[0]
+      const topArtistEntry = Object.entries(artistCount).sort((a, b) => b[1] - a[1])[0]
+      const topSongEntry = Object.values(songCount).sort((a, b) => b.count - a.count)[0]
+      
+      const topGenre = topGenreEntry?.[0] || 'Nenhum ainda'
+      const topGenreCount = topGenreEntry?.[1] || 0
+      const favoriteArtist = topArtistEntry?.[0] || 'Nenhum ainda'
+      const favoriteArtistCount = topArtistEntry?.[1] || 0
+      const favoriteSong = topSongEntry?.song?.titulo || 'Nenhuma ainda'
+      const favoriteSongCount = topSongEntry?.count || 0
+      
+      // Buscar banner do artista favorito
+      let bannerUrl = ''
+      if (favoriteArtist !== 'Nenhum ainda') {
+        const { data: artistaMusica } = await supabaseAny
+          .from('musicas')
+          .select('url_capa')
+          .eq('artista', favoriteArtist)
+          .not('url_capa', 'is', null)
+          .limit(1)
+        bannerUrl = artistaMusica?.[0]?.url_capa || ''
+      }
+      
+      // Calcular nível
+      let listeningLevel = 'Iniciante'
+      let levelProgress = 0
+      
+      if (totalHours >= 100) {
+        listeningLevel = 'Lendário 🏆'
+        levelProgress = 100
+      } else if (totalHours >= 50) {
+        listeningLevel = 'Expert 🎖️'
+        levelProgress = ((totalHours - 50) / 50) * 100
+      } else if (totalHours >= 20) {
+        listeningLevel = 'Avançado 🌟'
+        levelProgress = ((totalHours - 20) / 30) * 100
+      } else if (totalHours >= 5) {
+        listeningLevel = 'Intermediário 🎵'
+        levelProgress = ((totalHours - 5) / 15) * 100
+      } else if (totalHours > 0) {
+        listeningLevel = 'Aprendiz 🎧'
+        levelProgress = (totalHours / 5) * 100
+      } else {
+        levelProgress = 0
+      }
+      
+      levelProgress = Math.min(Math.max(levelProgress, 0), 100)
 
-  async function fetchRecentActivity() {
+      const newStats = {
+        playlists: playlistsCount.count || 0,
+        favorites: favoritesCount.count || 0,
+        history: historyCount.count || 0,
+        totalMinutes,
+        totalHours,
+        totalSongs,
+        topGenre,
+        topGenreCount,
+        favoriteArtist,
+        favoriteArtistCount,
+        favoriteSong,
+        favoriteSongCount,
+        listeningLevel,
+        levelProgress
+      }
+
+      // Buscar atividades recentes e top músicas
+      const { data: recentData } = await supabaseAny
+        .from('historico')
+        .select(`
+          musica:musica_id (*),
+          played_at
+        `)
+        .eq('usuario_id', user.id)
+        .order('played_at', { ascending: false })
+        .limit(10)
+
+      let activities = []
+      if (recentData && recentData.length > 0) {
+        for (const item of recentData) {
+          const musicaData = item.musica
+          if (musicaData) {
+            activities.push({
+              musica: musicaData,
+              played_at: item.played_at
+            })
+          }
+        }
+      }
+
+      // Buscar top músicas
+      const { data: topData } = await supabaseAny
+        .from('historico')
+        .select(`
+          musica:musica_id (*)
+        `)
+        .eq('usuario_id', user.id)
+        .limit(200)
+
+      let top5: any[] = []
+      if (topData && topData.length > 0) {
+        const musicCount: Record<string, any> = {}
+        for (const item of topData) {
+          const musica = item.musica
+          if (musica && musica.id) {
+            if (!musicCount[musica.id]) {
+              musicCount[musica.id] = { ...musica, count: 0 }
+            }
+            musicCount[musica.id].count++
+          }
+        }
+        top5 = Object.values(musicCount).sort((a: any, b: any) => b.count - a.count).slice(0, 5)
+      }
+
+      // Salvar no cache
+      profileCache.data = {
+        stats: newStats,
+        bannerImage: bannerUrl,
+        recentActivities: activities,
+        topMusics: top5
+      }
+      profileCache.timestamp = Date.now()
+
+      if (isMountedRef.current) {
+        setStats(newStats)
+        setBannerImage(bannerUrl)
+        setRecentActivities(activities)
+        setTopMusics(top5)
+      }
+    } catch (error) {
+      console.error('Erro ao buscar estatísticas:', error)
+    } finally {
+      if (isMountedRef.current) setLoading(false)
+      isFetchingRef.current = false
+    }
+  }, [user])
+
+  // Buscar atividades recentes
+  const fetchRecentActivity = useCallback(async () => {
     if (!user) return
 
     const supabaseAny = supabase as any
@@ -199,7 +279,7 @@ export default function ProfilePage() {
       .order('played_at', { ascending: false })
       .limit(10)
 
-    if (data && data.length > 0) {
+    if (data && data.length > 0 && isMountedRef.current) {
       const activities = []
       for (const item of data) {
         const musicaData = item.musica
@@ -212,9 +292,10 @@ export default function ProfilePage() {
       }
       setRecentActivities(activities)
     }
-  }
+  }, [user])
 
-  async function fetchTopMusics() {
+  // Buscar top músicas
+  const fetchTopMusics = useCallback(async () => {
     if (!user) return
 
     const supabaseAny = supabase as any
@@ -227,7 +308,7 @@ export default function ProfilePage() {
       .eq('usuario_id', user.id)
       .limit(200)
 
-    if (data && data.length > 0) {
+    if (data && data.length > 0 && isMountedRef.current) {
       const musicCount: Record<string, any> = {}
       for (const item of data) {
         const musica = item.musica
@@ -241,11 +322,20 @@ export default function ProfilePage() {
       const top5 = Object.values(musicCount).sort((a: any, b: any) => b.count - a.count).slice(0, 5)
       setTopMusics(top5)
     }
-  }
+  }, [user])
 
-  const handleSave = async () => {
+  useEffect(() => {
+    isMountedRef.current = true
+    fetchStats()
+    
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [fetchStats])
+
+  const handleSave = useCallback(async () => {
     if (!user) return
-    setLoading(true)
+    setIsSaving(true)
 
     const supabaseAny = supabase as any
     
@@ -261,71 +351,156 @@ export default function ProfilePage() {
     if (!error) {
       await refreshUser()
       setIsEditing(false)
+      // Limpar cache para recarregar dados atualizados
+      profileCache.data = null
+      fetchStats(true)
     }
-    setLoading(false)
-  }
+    setIsSaving(false)
+  }, [user, nome, bio, refreshUser, fetchStats])
 
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     await supabase.auth.signOut()
     router.push('/login')
-  }
+  }, [router])
 
-  const getLevelColor = () => {
+  const getLevelColor = useCallback(() => {
     const level = stats.listeningLevel
     if (level.includes('Lendário')) return 'from-yellow-400 via-orange-500 to-red-500'
     if (level.includes('Expert')) return 'from-purple-400 via-pink-500 to-red-500'
     if (level.includes('Avançado')) return 'from-blue-400 via-cyan-500 to-teal-500'
     if (level.includes('Intermediário')) return 'from-green-400 via-emerald-500 to-teal-500'
     return 'from-gray-400 via-gray-500 to-gray-600'
+  }, [stats.listeningLevel])
+
+  // Memoizar componentes
+  const heroSection = useMemo(() => (
+    <div className="relative h-48 md:h-64 rounded-2xl overflow-hidden mb-8 group">
+      <div className="absolute inset-0">
+        {bannerImage ? (
+          <>
+            <Image
+              src={bannerImage}
+              alt="Banner"
+              fill
+              className="object-cover scale-110 group-hover:scale-100 transition-transform duration-700"
+              priority
+            />
+            <div className={`absolute inset-0 bg-gradient-to-r ${getLevelColor()} opacity-60 mix-blend-overlay`} />
+          </>
+        ) : (
+          <div className={`absolute inset-0 bg-gradient-to-r ${getLevelColor()} animate-gradient bg-[length:200%_200%]`} />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent" />
+      </div>
+      
+      <div className="absolute top-4 right-4 glass-dark rounded-full px-4 py-2 flex items-center gap-2 z-10">
+        <Award size={16} className="text-yellow-400" />
+        <span className="text-sm font-medium text-white">{stats.listeningLevel}</span>
+      </div>
+      
+      {stats.favoriteArtist !== 'Nenhum ainda' && (
+        <div className="absolute bottom-4 left-4 glass-dark rounded-full px-3 py-1.5 flex items-center gap-2 z-10 backdrop-blur-md">
+          <Mic2 size={12} className="text-purple-400" />
+          <span className="text-xs text-white">Seu artista favorito: {stats.favoriteArtist}</span>
+        </div>
+      )}
+      
+      <div className="absolute bottom-4 right-4 glass-dark rounded-full px-3 py-1.5 flex items-center gap-2 z-10 backdrop-blur-md">
+        <Headphones size={12} className="text-green-400" />
+        <span className="text-xs text-white">{stats.totalHours} horas ouvidas</span>
+      </div>
+    </div>
+  ), [bannerImage, getLevelColor, stats.listeningLevel, stats.favoriteArtist, stats.totalHours])
+
+  const statsCards = useMemo(() => (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <StatCard 
+        icon={<Heart size={22} />}
+        value={stats.favorites}
+        label="Curtidas"
+        color="pink"
+        onClick={() => router.push('/favorites')}
+      />
+      <StatCard 
+        icon={<ListMusic size={22} />}
+        value={stats.playlists}
+        label="Playlists"
+        color="purple"
+        onClick={() => router.push('/library')}
+      />
+      <StatCard 
+        icon={<Headphones size={22} />}
+        value={stats.history}
+        label="Músicas"
+        color="green"
+      />
+      <StatCard 
+        icon={<Clock size={22} />}
+        value={stats.totalHours}
+        label="Horas"
+        color="orange"
+        suffix="h"
+      />
+    </div>
+  ), [stats, router])
+
+  const musicTasteSection = useMemo(() => (
+    <div className="grid md:grid-cols-2 gap-6">
+      <div className="glass rounded-2xl p-6 transition-all duration-300 hover:scale-[1.02] group">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center group-hover:scale-110 transition-transform">
+            <Disc3 size={22} className="text-white" />
+          </div>
+          <div>
+            <h3 className="text-xs text-gray-400 uppercase tracking-wider">Gênero Favorito</h3>
+            <p className="text-xl font-bold text-white">{stats.topGenre}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 text-sm text-gray-400">
+          <TrendingUp size={14} />
+          <span>{stats.topGenreCount} músicas ouvidas neste gênero</span>
+        </div>
+      </div>
+
+      <div className="glass rounded-2xl p-6 transition-all duration-300 hover:scale-[1.02] group">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-r from-orange-500 to-red-500 flex items-center justify-center group-hover:scale-110 transition-transform">
+            <Star size={22} className="text-white" />
+          </div>
+          <div>
+            <h3 className="text-xs text-gray-400 uppercase tracking-wider">Música Favorita</h3>
+            <p className="text-lg font-bold text-white truncate max-w-[200px]">{stats.favoriteSong}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 text-sm text-gray-400">
+          <Headphones size={14} />
+          <span>Ouvida {stats.favoriteSongCount} {stats.favoriteSongCount === 1 ? 'vez' : 'vezes'}</span>
+        </div>
+      </div>
+    </div>
+  ), [stats])
+
+  // Estado de loading
+  if (loading) {
+    return (
+      <div className="space-y-6 animate-pulse">
+        <div className="h-48 bg-white/10 rounded-2xl" />
+        <div className="h-32 bg-white/10 rounded-2xl" />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-24 bg-white/10 rounded-xl" />
+          ))}
+        </div>
+      </div>
+    )
   }
 
   return (
     <div className="min-h-screen pb-20 animate-fade-in">
-      {/* Hero Section com Banner Personalizado - SEM AVATAR */}
-      <div className="relative h-48 md:h-64 rounded-2xl overflow-hidden mb-8 group">
-        {/* Banner de fundo */}
-        <div className="absolute inset-0">
-          {bannerImage ? (
-            <>
-              <Image
-                src={bannerImage}
-                alt="Banner"
-                fill
-                className="object-cover scale-110 group-hover:scale-100 transition-transform duration-700"
-                priority
-              />
-              <div className={`absolute inset-0 bg-gradient-to-r ${getLevelColor()} opacity-60 mix-blend-overlay`} />
-            </>
-          ) : (
-            <div className={`absolute inset-0 bg-gradient-to-r ${getLevelColor()} animate-gradient bg-[length:200%_200%]`} />
-          )}
-          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent" />
-        </div>
-        
-        {/* Nível */}
-        <div className="absolute top-4 right-4 glass-dark rounded-full px-4 py-2 flex items-center gap-2 z-10">
-          <Award size={16} className="text-yellow-400" />
-          <span className="text-sm font-medium text-white">{stats.listeningLevel}</span>
-        </div>
-        
-        {/* Informação do Artista Favorito no Banner */}
-        {stats.favoriteArtist !== 'Nenhum ainda' && (
-          <div className="absolute bottom-4 left-4 glass-dark rounded-full px-3 py-1.5 flex items-center gap-2 z-10 backdrop-blur-md">
-            <Mic2 size={12} className="text-purple-400" />
-            <span className="text-xs text-white">Seu artista favorito: {stats.favoriteArtist}</span>
-          </div>
-        )}
-        
-        {/* Informação de Total de Horas */}
-        <div className="absolute bottom-4 right-4 glass-dark rounded-full px-3 py-1.5 flex items-center gap-2 z-10 backdrop-blur-md">
-          <Headphones size={12} className="text-green-400" />
-          <span className="text-xs text-white">{stats.totalHours} horas ouvidas</span>
-        </div>
-      </div>
+      {heroSection}
 
-      {/* Profile Content */}
       <div className="max-w-4xl mx-auto px-4 space-y-8">
-        {/* Header Info - Sem avatar */}
+        {/* Header Info */}
         <div className="text-center">
           {isEditing ? (
             <input
@@ -368,71 +543,8 @@ export default function ProfilePage() {
           </p>
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard 
-            icon={<Heart size={22} />}
-            value={stats.favorites}
-            label="Curtidas"
-            color="pink"
-            onClick={() => router.push('/favorites')}
-          />
-          <StatCard 
-            icon={<ListMusic size={22} />}
-            value={stats.playlists}
-            label="Playlists"
-            color="purple"
-            onClick={() => router.push('/library')}
-          />
-          <StatCard 
-            icon={<Headphones size={22} />}
-            value={stats.history}
-            label="Músicas"
-            color="green"
-          />
-          <StatCard 
-            icon={<Clock size={22} />}
-            value={stats.totalHours}
-            label="Horas"
-            color="orange"
-            suffix="h"
-          />
-        </div>
-
-        {/* Music Taste Section */}
-        <div className="grid md:grid-cols-2 gap-6">
-          <div className="glass rounded-2xl p-6 transition-all duration-300 hover:scale-[1.02] group">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Disc3 size={22} className="text-white" />
-              </div>
-              <div>
-                <h3 className="text-xs text-gray-400 uppercase tracking-wider">Gênero Favorito</h3>
-                <p className="text-xl font-bold text-white">{stats.topGenre}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 text-sm text-gray-400">
-              <TrendingUp size={14} />
-              <span>{stats.topGenreCount} músicas ouvidas neste gênero</span>
-            </div>
-          </div>
-
-          <div className="glass rounded-2xl p-6 transition-all duration-300 hover:scale-[1.02] group">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-r from-orange-500 to-red-500 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Star size={22} className="text-white" />
-              </div>
-              <div>
-                <h3 className="text-xs text-gray-400 uppercase tracking-wider">Música Favorita</h3>
-                <p className="text-lg font-bold text-white truncate max-w-[200px]">{stats.favoriteSong}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 text-sm text-gray-400">
-              <Headphones size={14} />
-              <span>Ouvida {stats.favoriteSongCount} {stats.favoriteSongCount === 1 ? 'vez' : 'vezes'}</span>
-            </div>
-          </div>
-        </div>
+        {statsCards}
+        {musicTasteSection}
 
         {/* Top Músicas Mais Ouvidas */}
         {topMusics.length > 0 && (
@@ -565,11 +677,15 @@ export default function ProfilePage() {
               </button>
               <button
                 onClick={handleSave}
-                disabled={loading}
-                className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 py-3 rounded-xl font-medium hover:opacity-90 transition-all duration-300 flex items-center justify-center gap-2"
+                disabled={isSaving}
+                className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 py-3 rounded-xl font-medium hover:opacity-90 transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                <Save size={18} />
-                {loading ? 'Salvando...' : 'Salvar'}
+                {isSaving ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Save size={18} />
+                )}
+                {isSaving ? 'Salvando...' : 'Salvar'}
               </button>
             </>
           )}

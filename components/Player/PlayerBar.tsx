@@ -6,71 +6,78 @@ import { VolumeControl } from './VolumeControl'
 import { ProgressBar } from './ProgressBar'
 import { formatTime } from '@/lib/utils/formatTime'
 import Image from 'next/image'
-import { Heart } from 'lucide-react'
+import { Heart, SkipForward, SkipBack, Play, Pause, Radio, Loader2 } from 'lucide-react'
 import { useFavorites } from '@/lib/hooks/useFavorites'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback, useMemo } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/hooks/useAuth'
 
 export function PlayerBar() {
-  const { currentSong, duration, currentTime, isPlaying } = usePlayerStore()
+  const { 
+    currentSong, 
+    duration, 
+    currentTime, 
+    isPlaying, 
+    nextSong, 
+    previousSong,
+    togglePlay,
+    isGlobalShuffle,
+    toggleGlobalShuffle,
+    playRandomSong
+  } = usePlayerStore()
   const { favorites, toggleFavorite } = useFavorites()
   const { user } = useAuth()
   const hasSavedRef = useRef<string>('')
   const saveTimeoutRef = useRef<NodeJS.Timeout>()
+  const [isBuffering, setIsBuffering] = useState(false)
+  const isMountedRef = useRef(true)
 
-  // SALVAR NO HISTÓRICO - Quando a música começa a tocar
-  useEffect(() => {
-    // Limpar timeout anterior
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current)
-    }
-
+  // SALVAR NO HISTÓRICO - Otimizado
+  const saveToHistory = useCallback(async () => {
     if (!currentSong || !user || !isPlaying) return
-    
-    // Evitar salvar múltiplas vezes para a mesma música
     if (hasSavedRef.current === currentSong.id) return
     
-    // Salvar após 10 segundos de reprodução (para não contar cliques acidentais)
-    saveTimeoutRef.current = setTimeout(async () => {
-      if (isPlaying && currentSong && user && hasSavedRef.current !== currentSong.id) {
-        try {
-          const supabaseAny = supabase as any
-          const { error } = await supabaseAny
-            .from('historico')
-            .insert({
-              usuario_id: user.id,
-              musica_id: currentSong.id,
-              played_at: new Date().toISOString()
-            })
-          
-          if (!error) {
-            hasSavedRef.current = currentSong.id
-            console.log('✅ Salvo no histórico:', currentSong.titulo)
-          }
-        } catch (error) {
-          console.error('Erro ao salvar no histórico:', error)
-        }
+    try {
+      const supabaseAny = supabase as any
+      const { error } = await supabaseAny
+        .from('historico')
+        .insert({
+          usuario_id: user.id,
+          musica_id: currentSong.id,
+          played_at: new Date().toISOString()
+        })
+      
+      if (!error) {
+        hasSavedRef.current = currentSong.id
       }
-    }, 10000) // 10 segundos
-
-    return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current)
-      }
+    } catch (error) {
+      console.error('Erro ao salvar no histórico:', error)
     }
-  }, [currentSong, isPlaying, user])
+  }, [currentSong, user, isPlaying])
 
-  // Resetar o saved ref quando a música muda
+  useEffect(() => {
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
+    if (!currentSong || !user || !isPlaying) return
+    if (hasSavedRef.current === currentSong.id) return
+    
+    saveTimeoutRef.current = setTimeout(saveToHistory, 10000)
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
+    }
+  }, [currentSong, isPlaying, user, saveToHistory])
+
   useEffect(() => {
     hasSavedRef.current = ''
+    setIsBuffering(false)
   }, [currentSong?.id])
 
-  // Media Session API para lock screen
+  // Media Session API - Combinado em um único efeito
   useEffect(() => {
     if (!currentSong) return
 
-    if ('mediaSession' in navigator) {
+    const updateMediaSession = () => {
+      if (!('mediaSession' in navigator)) return
+      
       try {
         navigator.mediaSession.metadata = new MediaMetadata({
           title: currentSong.titulo,
@@ -86,14 +93,23 @@ export function PlayerBar() {
           ]
         })
 
-        navigator.mediaSession.setActionHandler('play', () => usePlayerStore.getState().togglePlay())
-        navigator.mediaSession.setActionHandler('pause', () => usePlayerStore.getState().togglePlay())
-        navigator.mediaSession.setActionHandler('previoustrack', () => usePlayerStore.getState().previousSong())
-        navigator.mediaSession.setActionHandler('nexttrack', () => usePlayerStore.getState().nextSong())
-      } catch (error) {
-        console.log('MediaSession não suportada neste navegador')
-      }
+        navigator.mediaSession.setActionHandler('play', () => togglePlay())
+        navigator.mediaSession.setActionHandler('pause', () => togglePlay())
+        navigator.mediaSession.setActionHandler('previoustrack', () => previousSong())
+        navigator.mediaSession.setActionHandler('nexttrack', () => nextSong())
+        navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused'
+        
+        if (duration > 0) {
+          navigator.mediaSession.setPositionState({
+            duration: duration,
+            position: currentTime,
+            playbackRate: 1
+          })
+        }
+      } catch (error) {}
     }
+
+    updateMediaSession()
 
     return () => {
       if ('mediaSession' in navigator) {
@@ -102,40 +118,50 @@ export function PlayerBar() {
           navigator.mediaSession.setActionHandler('pause', null)
           navigator.mediaSession.setActionHandler('previoustrack', null)
           navigator.mediaSession.setActionHandler('nexttrack', null)
-        } catch (error) {
-          // Ignora erro ao limpar handlers
-        }
+        } catch (error) {}
       }
+    }
+  }, [currentSong, isPlaying, currentTime, duration, togglePlay, previousSong, nextSong])
+
+  // Simular buffering (quando a música está carregando)
+  useEffect(() => {
+    if (!currentSong) return
+    
+    // Simular loading da música (Howl.js tem evento onload, mas é complexo)
+    const timer = setTimeout(() => setIsBuffering(false), 500)
+    setIsBuffering(true)
+    
+    return () => clearTimeout(timer)
+  }, [currentSong?.id])
+
+  const handleGlobalShuffle = useCallback(async () => {
+    if (!isGlobalShuffle) {
+      await toggleGlobalShuffle()
+      await playRandomSong()
+    } else {
+      toggleGlobalShuffle()
+    }
+  }, [isGlobalShuffle, toggleGlobalShuffle, playRandomSong])
+
+  const handleToggleFavorite = useCallback(() => {
+    if (currentSong) toggleFavorite(currentSong.id)
+  }, [currentSong, toggleFavorite])
+
+  // Memoizar valores calculados
+  const isFavorite = useMemo(() => 
+    currentSong ? favorites.includes(currentSong.id) : false
+  , [favorites, currentSong])
+
+  const songInfo = useMemo(() => {
+    if (!currentSong) return null
+    return {
+      title: currentSong.titulo,
+      artist: currentSong.artista,
+      cover: currentSong.url_capa
     }
   }, [currentSong])
 
-  // Atualiza estado de reprodução
-  useEffect(() => {
-    if ('mediaSession' in navigator) {
-      try {
-        navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused'
-      } catch (error) {
-        // Ignora erro
-      }
-    }
-  }, [isPlaying])
-
-  // Atualiza posição da música
-  useEffect(() => {
-    if ('mediaSession' in navigator && duration > 0) {
-      try {
-        navigator.mediaSession.setPositionState({
-          duration: duration,
-          position: currentTime,
-          playbackRate: 1
-        })
-      } catch (error) {
-        // Ignora erro
-      }
-    }
-  }, [currentTime, duration])
-
-  if (!currentSong) {
+  if (!currentSong || !songInfo) {
     return (
       <div className="flex-shrink-0 bg-black/80 backdrop-blur-xl border-t border-white/10 py-3">
         <div className="max-w-7xl mx-auto text-center text-gray-500 text-sm">
@@ -145,42 +171,11 @@ export function PlayerBar() {
     )
   }
 
-  const isFavorite = favorites.includes(currentSong.id)
-
   return (
     <div className="flex-shrink-0 bg-black/80 backdrop-blur-xl border-t border-white/10 py-3 px-4">
-      <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 flex-wrap md:flex-nowrap">
-        {/* Song Info */}
-        <div className="flex items-center gap-3 min-w-[180px]">
-          <div className="relative w-10 h-10 rounded-lg overflow-hidden flex-shrink-0">
-            {currentSong.url_capa ? (
-              <Image
-                src={currentSong.url_capa}
-                alt={currentSong.titulo}
-                fill
-                className="object-cover"
-              />
-            ) : (
-              <div className="w-full h-full bg-gradient-to-br from-purple-500 to-pink-500" />
-            )}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-white truncate">{currentSong.titulo}</p>
-            <p className="text-xs text-gray-400 truncate">{currentSong.artista}</p>
-          </div>
-          <button
-            onClick={() => toggleFavorite(currentSong.id)}
-            className={`p-1 rounded-full transition-colors flex-shrink-0 ${isFavorite ? 'text-red-500' : 'text-gray-400 hover:text-red-500'}`}
-          >
-            <Heart size={16} fill={isFavorite ? 'currentColor' : 'none'} />
-          </button>
-        </div>
-
-        {/* Controls */}
-        <div className="flex-1 max-w-md">
-          <div className="flex items-center justify-center mb-1">
-            <PlayerControls />
-          </div>
+      <div className="max-w-7xl mx-auto">
+        {/* Progress Bar superior */}
+        <div className="w-full mb-2">
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-400 w-10 text-right">{formatTime(currentTime)}</span>
             <ProgressBar />
@@ -188,11 +183,101 @@ export function PlayerBar() {
           </div>
         </div>
 
-        {/* Volume */}
-        <div className="min-w-[100px] flex justify-end">
-          <VolumeControl />
+        {/* Controles principais */}
+        <div className="flex items-center justify-between gap-4 flex-wrap md:flex-nowrap">
+          {/* Song Info */}
+          <div className="flex items-center gap-3 min-w-[180px]">
+            <div className="relative w-10 h-10 rounded-lg overflow-hidden flex-shrink-0">
+              {songInfo.cover ? (
+                <Image
+                  src={songInfo.cover}
+                  alt={songInfo.title}
+                  fill
+                  className="object-cover"
+                  priority
+                />
+              ) : (
+                <div className="w-full h-full bg-gradient-to-br from-purple-500 to-pink-500" />
+              )}
+              {isBuffering && (
+                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                  <Loader2 size={16} className="text-white animate-spin" />
+                </div>
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-white truncate">{songInfo.title}</p>
+              <p className="text-xs text-gray-400 truncate">{songInfo.artist}</p>
+            </div>
+            <button
+              onClick={handleToggleFavorite}
+              className={`p-1.5 rounded-full transition-all duration-300 flex-shrink-0 ${
+                isFavorite 
+                  ? 'text-red-500 bg-red-500/10 scale-105' 
+                  : 'text-gray-400 hover:text-red-500 hover:bg-red-500/10'
+              }`}
+              aria-label={isFavorite ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}
+            >
+              <Heart size={16} fill={isFavorite ? 'currentColor' : 'none'} />
+            </button>
+          </div>
+
+          {/* Controles Centrais */}
+          <div className="flex items-center justify-center gap-2 md:gap-4">
+            {/* Modo Aleatório Global */}
+            <button
+              onClick={handleGlobalShuffle}
+              className={`p-2 rounded-full transition-all duration-300 ${
+                isGlobalShuffle 
+                  ? 'text-purple-400 bg-purple-500/20 shadow-lg shadow-purple-500/20' 
+                  : 'text-gray-400 hover:text-white hover:bg-white/10'
+              }`}
+              title={isGlobalShuffle ? 'Desativar modo aleatório' : 'Ativar modo aleatório - tocar todas as músicas'}
+              aria-label="Modo aleatório global"
+            >
+              <Radio size={18} />
+            </button>
+
+            {/* Anterior */}
+            <button
+              onClick={previousSong}
+              className="p-2 rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-all duration-300"
+              title="Música anterior"
+              aria-label="Anterior"
+            >
+              <SkipBack size={20} />
+            </button>
+
+            {/* Play/Pause */}
+            <button
+              onClick={togglePlay}
+              className="bg-white text-black rounded-full p-3 hover:scale-105 transition-all duration-300 shadow-lg"
+              title={isPlaying ? 'Pausar' : 'Tocar'}
+              aria-label={isPlaying ? 'Pausar' : 'Tocar'}
+            >
+              {isPlaying ? <Pause size={20} /> : <Play size={20} className="ml-0.5" />}
+            </button>
+
+            {/* Próxima */}
+            <button
+              onClick={nextSong}
+              className="p-2 rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-all duration-300"
+              title="Próxima música"
+              aria-label="Próxima"
+            >
+              <SkipForward size={20} />
+            </button>
+          </div>
+
+          {/* Volume */}
+          <div className="min-w-[100px] flex justify-end">
+            <VolumeControl />
+          </div>
         </div>
       </div>
     </div>
   )
 }
+
+// Adicionar useState
+import { useState } from 'react'

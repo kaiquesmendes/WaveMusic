@@ -1,14 +1,22 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { MusicList } from '@/components/Music/MusicList'
 import { supabase } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/hooks/useAuth'
 import { Musica } from '@/types'
-import { Heart, Music, Clock, TrendingUp, Play, Trash2 } from 'lucide-react'
+import { Heart, Music, Clock, TrendingUp, Play } from 'lucide-react'
 import Link from 'next/link'
 import { usePlayerStore } from '@/store/playerStore'
 import Image from 'next/image'
+
+// Cache de favoritos (evita requisições duplicadas)
+const favoritesCache = {
+  data: null as { favorites: Musica[], stats: any } | null,
+  timestamp: 0,
+  expiryTime: 2 * 60 * 1000, // 2 minutos (favoritos mudam com frequência)
+  isValid: () => Date.now() - favoritesCache.timestamp < favoritesCache.expiryTime
+}
 
 export default function FavoritesPage() {
   const { user } = useAuth()
@@ -16,21 +24,27 @@ export default function FavoritesPage() {
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState({ totalMinutes: 0, topArtist: '', topGenre: '' })
   const { setCurrentSong } = usePlayerStore()
+  const isMountedRef = useRef(true)
+  const isRefreshingRef = useRef(false)
 
-  useEffect(() => {
-    if (user?.id) {
-      fetchFavorites()
-    } else {
-      setLoading(false)
-    }
-  }, [user])
-
-  async function fetchFavorites() {
+  const fetchFavorites = useCallback(async (forceRefresh = false) => {
     if (!user?.id) {
       setLoading(false)
       return
     }
 
+    // Usar cache se válido e não for refresh forçado
+    if (!forceRefresh && favoritesCache.isValid() && favoritesCache.data) {
+      setFavorites(favoritesCache.data.favorites)
+      setStats(favoritesCache.data.stats)
+      setLoading(false)
+      return
+    }
+
+    // Evitar múltiplas requisições simultâneas
+    if (isRefreshingRef.current) return
+    isRefreshingRef.current = true
+    
     setLoading(true)
     
     try {
@@ -45,17 +59,14 @@ export default function FavoritesPage() {
         .eq('usuario_id', user.id)
         .order('created_at', { ascending: false })
 
-      if (error) {
-        console.error('Erro ao buscar favoritos:', error)
-        setLoading(false)
-        return
-      }
+      if (error) throw error
 
+      let musicasList: Musica[] = []
+      
       if (data && data.length > 0) {
-        const musicasList = data
+        musicasList = data
           .map((item: any) => item.musicas)
           .filter((m: Musica) => m !== null)
-        setFavorites(musicasList)
         
         // Calcular estatísticas
         const totalSeconds = musicasList.reduce((acc: number, m: Musica) => acc + (m.duracao || 0), 0)
@@ -77,23 +88,113 @@ export default function FavoritesPage() {
         const topArtist = Object.entries(artistCount).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Nenhum'
         const topGenre = Object.entries(genreCount).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Nenhum'
         
-        setStats({ totalMinutes, topArtist, topGenre })
+        const newStats = { totalMinutes, topArtist, topGenre }
+        
+        // Salvar no cache
+        favoritesCache.data = { favorites: musicasList, stats: newStats }
+        favoritesCache.timestamp = Date.now()
+        
+        if (isMountedRef.current) {
+          setFavorites(musicasList)
+          setStats(newStats)
+        }
       } else {
-        setFavorites([])
+        if (isMountedRef.current) setFavorites([])
       }
     } catch (error) {
-      console.error('Erro inesperado:', error)
+      console.error('Erro ao buscar favoritos:', error)
     } finally {
-      setLoading(false)
+      if (isMountedRef.current) setLoading(false)
+      isRefreshingRef.current = false
     }
-  }
+  }, [user?.id])
 
-  const playAllFavorites = () => {
+  // Carregar dados iniciais
+  useEffect(() => {
+    isMountedRef.current = true
+    fetchFavorites()
+    
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [fetchFavorites])
+
+  const playAllFavorites = useCallback(() => {
     if (favorites.length > 0) {
       setCurrentSong(favorites[0], favorites)
     }
-  }
+  }, [favorites, setCurrentSong])
 
+  // Memoizar componentes
+  const statsCards = useMemo(() => {
+    if (favorites.length === 0) return null
+    
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <StatCard 
+          icon={<Heart size={20} />}
+          value={favorites.length}
+          label="Músicas curtidas"
+          color="pink"
+        />
+        <StatCard 
+          icon={<Clock size={20} />}
+          value={stats.totalMinutes}
+          label="Minutos de música"
+          color="purple"
+          suffix="min"
+        />
+        <StatCard 
+          icon={<TrendingUp size={20} />}
+          value={stats.topArtist}
+          label="Artista favorito"
+          color="orange"
+        />
+        <StatCard 
+          icon={<Music size={20} />}
+          value={stats.topGenre}
+          label="Gênero favorito"
+          color="green"
+        />
+      </div>
+    )
+  }, [favorites.length, stats])
+
+  const emptyState = useMemo(() => {
+    if (favorites.length > 0) return null
+    
+    return (
+      <>
+        <div className="glass rounded-2xl p-12 text-center">
+          <div className="w-20 h-20 bg-gradient-to-br from-pink-500/20 to-red-500/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Heart size={40} className="text-pink-400" />
+          </div>
+          <h3 className="text-xl font-semibold text-white mb-2">Sua playlist está vazia</h3>
+          <p className="text-gray-400 mb-4 max-w-md mx-auto">
+            Comece a curtir suas músicas favoritas clicando no coração ♥ enquanto ouve
+          </p>
+          <Link 
+            href="/explore"
+            className="bg-gradient-to-r from-purple-500 to-pink-500 px-6 py-2.5 rounded-full font-medium hover:scale-105 transition-transform inline-flex items-center gap-2"
+          >
+            <Music size={16} />
+            Explorar músicas
+          </Link>
+        </div>
+
+        <div className="mt-6 glass-dark rounded-xl p-4 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center">
+            <Heart size={14} className="text-purple-400" />
+          </div>
+          <p className="text-sm text-gray-300">
+            💡 Dica: Ao ouvir uma música, clique no ícone <Heart size={12} className="inline text-pink-400" /> para adicioná-la aos seus favoritos!
+          </p>
+        </div>
+      </>
+    )
+  }, [favorites.length])
+
+  // Estado de loading
   if (loading) {
     return (
       <div className="space-y-6 animate-pulse">
@@ -115,7 +216,6 @@ export default function FavoritesPage() {
         <div className="absolute inset-0 bg-gradient-to-r from-pink-600 via-red-600 to-purple-600 animate-gradient bg-[length:200%_200%]" />
         <div className="absolute inset-0 bg-black/40 group-hover:bg-black/30 transition-all" />
         
-        {/* Elementos decorativos */}
         <div className="absolute top-4 right-4 opacity-10 group-hover:opacity-20 transition-opacity">
           <Heart size={80} className="text-white" />
         </div>
@@ -136,36 +236,7 @@ export default function FavoritesPage() {
         </div>
       </div>
 
-      {/* Stats Cards */}
-      {favorites.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <StatCard 
-            icon={<Heart size={20} />}
-            value={favorites.length}
-            label="Músicas curtidas"
-            color="pink"
-          />
-          <StatCard 
-            icon={<Clock size={20} />}
-            value={stats.totalMinutes}
-            label="Minutos de música"
-            color="purple"
-            suffix="min"
-          />
-          <StatCard 
-            icon={<TrendingUp size={20} />}
-            value={stats.topArtist}
-            label="Artista favorito"
-            color="orange"
-          />
-          <StatCard 
-            icon={<Music size={20} />}
-            value={stats.topGenre}
-            label="Gênero favorito"
-            color="green"
-          />
-        </div>
-      )}
+      {statsCards}
 
       {/* Play All Button */}
       {favorites.length > 0 && (
@@ -187,34 +258,7 @@ export default function FavoritesPage() {
           <MusicList musicas={favorites} showImage showAlbum />
         </div>
       ) : (
-        <div className="glass rounded-2xl p-12 text-center">
-          <div className="w-20 h-20 bg-gradient-to-br from-pink-500/20 to-red-500/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <Heart size={40} className="text-pink-400" />
-          </div>
-          <h3 className="text-xl font-semibold text-white mb-2">Sua playlist está vazia</h3>
-          <p className="text-gray-400 mb-4 max-w-md mx-auto">
-            Comece a curtir suas músicas favoritas clicando no coração ♥ enquanto ouve
-          </p>
-          <Link 
-            href="/explore"
-            className="bg-gradient-to-r from-purple-500 to-pink-500 px-6 py-2.5 rounded-full font-medium hover:scale-105 transition-transform inline-flex items-center gap-2"
-          >
-            <Music size={16} />
-            Explorar músicas
-          </Link>
-        </div>
-      )}
-
-      {/* Dica para novos usuários */}
-      {favorites.length === 0 && (
-        <div className="mt-6 glass-dark rounded-xl p-4 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center">
-            <Heart size={14} className="text-purple-400" />
-          </div>
-          <p className="text-sm text-gray-300">
-            💡 Dica: Ao ouvir uma música, clique no ícone <Heart size={12} className="inline text-pink-400" /> para adicioná-la aos seus favoritos!
-          </p>
-        </div>
+        emptyState
       )}
     </div>
   )
@@ -235,13 +279,15 @@ function StatCard({ icon, value, label, color, suffix = '' }: {
     orange: 'from-orange-500/20 to-amber-500/20 text-orange-400'
   }
 
+  const displayValue = typeof value === 'number' ? value.toLocaleString() : value
+
   return (
     <div className="glass rounded-xl p-4 text-center group hover:scale-105 transition-all duration-300">
       <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${colors[color as keyof typeof colors]} flex items-center justify-center mx-auto mb-2 transition-all duration-300 group-hover:scale-110`}>
         {icon}
       </div>
       <div className="text-xl font-bold text-white">
-        {typeof value === 'number' ? value.toLocaleString() : value}{suffix}
+        {displayValue}{suffix}
       </div>
       <div className="text-xs text-gray-400">{label}</div>
     </div>
