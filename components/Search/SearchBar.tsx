@@ -14,26 +14,26 @@ interface SearchBarProps {
   onResultClick?: (music: Musica) => void
 }
 
-interface ArtistaResult {
-  artista: string
-  url_capa: string | null
-}
-
-interface AlbumResult {
-  album: string
-  artista: string
-  url_capa: string | null
-}
-
-// Cache de resultados de busca (opcional, para melhor performance)
+// Cache de resultados de busca
 const searchCache = new Map<string, { data: any; timestamp: number }>()
 const CACHE_DURATION = 30 * 1000 // 30 segundos
+
+// Componente de ícone de música
+function MusicIcon(props: any) {
+  return (
+    <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M9 18V5l12-2v13" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="16" r="3" />
+    </svg>
+  )
+}
 
 export function SearchBar({ onSearch, initialValue = '', onResultClick }: SearchBarProps) {
   const [query, setQuery] = useState(initialValue)
   const [results, setResults] = useState<Musica[]>([])
-  const [artistasResults, setArtistasResults] = useState<ArtistaResult[]>([])
-  const [albunsResults, setAlbunsResults] = useState<AlbumResult[]>([])
+  const [artistasResults, setArtistasResults] = useState<Array<{ artista: string; url_capa: string | null }>>([])
+  const [albunsResults, setAlbunsResults] = useState<Array<{ album: string; artista: string; url_capa: string | null }>>([])
   const [isOpen, setIsOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
@@ -42,7 +42,6 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
   const { setCurrentSong } = usePlayerStore()
   const router = useRouter()
 
-  // Limpar cache quando o componente desmontar (opcional)
   useEffect(() => {
     isMountedRef.current = true
     return () => {
@@ -55,7 +54,6 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
     setQuery(initialValue)
   }, [initialValue])
 
-  // Click outside handler - memoizado
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
@@ -66,7 +64,6 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Função de busca principal - memoizada
   const searchAll = useCallback(async (searchQuery: string) => {
     if (searchQuery.length < 2) {
       setResults([])
@@ -90,8 +87,8 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
     const supabaseAny = supabase as any
     
     try {
-      // Executar queries em paralelo para melhor performance
-      const [musicasPromise, artistasPromise, albunsPromise] = await Promise.allSettled([
+      // Executar queries em paralelo
+      const [musicasResult, artistasResult, albunsResult] = await Promise.all([
         supabaseAny
           .from('musicas')
           .select('*')
@@ -110,33 +107,33 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
           .limit(5)
       ])
 
-      let musicasData = null
-      let artistasData = null
-      let albunsData = null
-
-      if (musicasPromise.status === 'fulfilled') musicasData = musicasPromise.value.data
-      if (artistasPromise.status === 'fulfilled') artistasData = artistasPromise.value.data
-      if (albunsPromise.status === 'fulfilled') albunsData = albunsPromise.value.data
-
-      // Processar resultados
       let resultsList: Musica[] = []
-      let artistasList: ArtistaResult[] = []
-      let albunsList: AlbumResult[] = []
+      let artistasList: Array<{ artista: string; url_capa: string | null }> = []
+      let albunsList: Array<{ album: string; artista: string; url_capa: string | null }> = []
 
-      if (musicasData) resultsList = musicasData
-      
-      if (artistasData) {
-        const uniqueArtistas = Array.from(
-          new Map(artistasData.map((a: ArtistaResult) => [a.artista, a])).values()
-        )
-        artistasList = uniqueArtistas.slice(0, 3)
+      if (musicasResult.data) {
+        resultsList = musicasResult.data
       }
       
-      if (albunsData) {
-        const uniqueAlbuns = Array.from(
-          new Map(albunsData.map((a: AlbumResult) => [a.album, a])).values()
+      if (artistasResult.data && artistasResult.data.length > 0) {
+        const uniqueArtistas = Array.from(
+          new Map(artistasResult.data.map((a: any) => [a.artista, a])).values()
         )
-        albunsList = uniqueAlbuns.slice(0, 3)
+        artistasList = uniqueArtistas.slice(0, 3).map((a: any) => ({
+          artista: a.artista,
+          url_capa: a.url_capa
+        }))
+      }
+      
+      if (albunsResult.data && albunsResult.data.length > 0) {
+        const uniqueAlbuns = Array.from(
+          new Map(albunsResult.data.map((a: any) => [a.album, a])).values()
+        )
+        albunsList = uniqueAlbuns.slice(0, 3).map((a: any) => ({
+          album: a.album,
+          artista: a.artista,
+          url_capa: a.url_capa
+        }))
       }
 
       // Salvar no cache
@@ -158,7 +155,6 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
     }
   }, [])
 
-  // Debounce da busca
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     
@@ -208,15 +204,6 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
   const hasResults = useMemo(() => 
     results.length > 0 || artistasResults.length > 0 || albunsResults.length > 0
   , [results.length, artistasResults.length, albunsResults.length])
-
-  // Componente de ícone de música memoizado
-  const MusicIcon = useCallback((props: any) => (
-    <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M9 18V5l12-2v13" />
-      <circle cx="6" cy="18" r="3" />
-      <circle cx="18" cy="16" r="3" />
-    </svg>
-  ), [])
 
   return (
     <div ref={searchRef} className="relative w-full md:w-96">
