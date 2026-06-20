@@ -16,7 +16,14 @@ interface PlayerState {
   isRepeat: boolean
   isGlobalShuffle: boolean
   isLoading: boolean
-  
+  error: string | null
+
+  // controle interno (não usar fora da store)
+  _playToken: number
+  _progressInterval: ReturnType<typeof setInterval> | null
+  _shuffleHistory: string[]
+  _errorStreak: number
+
   setCurrentSong: (song: Musica, queue?: Musica[]) => void
   togglePlay: () => void
   setVolume: (volume: number) => void
@@ -29,6 +36,21 @@ interface PlayerState {
   loadAllSongs: () => Promise<void>
   playRandomSong: () => Promise<void>
   destroyHowl: () => void
+}
+
+// Escolhe a próxima música aleatória evitando repetir até esgotar a lista
+function pickRandomSong(queue: Musica[], history: string[], excludeId?: string): { song: Musica; newHistory: string[] } {
+  const candidates = queue.filter(s => s.id !== excludeId)
+  let pool = candidates.filter(s => !history.includes(s.id))
+
+  // Já tocou todas as outras músicas -> reinicia o histórico
+  if (pool.length === 0) {
+    pool = candidates.length > 0 ? candidates : queue
+    history = []
+  }
+
+  const song = pool[Math.floor(Math.random() * pool.length)]
+  return { song, newHistory: [...history, song.id] }
 }
 
 export const usePlayerStore = create<PlayerState>((set, get) => ({
@@ -45,69 +67,90 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   isRepeat: false,
   isGlobalShuffle: false,
   isLoading: false,
+  error: null,
+
+  _playToken: 0,
+  _progressInterval: null,
+  _shuffleHistory: [],
+  _errorStreak: 0,
 
   destroyHowl: () => {
-    const { howl } = get()
+    const { howl, _progressInterval } = get()
+
+    // Invalida qualquer callback "zumbi" de uma instância antiga do Howl
+    set({ _playToken: get()._playToken + 1 })
+
+    if (_progressInterval) {
+      clearInterval(_progressInterval)
+    }
+
     if (howl) {
       try {
+        howl.off() // remove todos os listeners antes de descarregar
         howl.stop()
         howl.unload()
       } catch (e) {
         console.error('Erro ao destruir Howl:', e)
       }
-      set({ howl: null })
     }
+
+    set({ howl: null, _progressInterval: null })
   },
 
   loadAllSongs: async () => {
     const supabaseAny = (await import('@/lib/supabase/client')).supabase as any
-    const { data } = await supabaseAny
+    const { data, error } = await supabaseAny
       .from('musicas')
       .select('*')
-    
+
+    if (error) {
+      console.error('Erro ao carregar músicas:', error)
+      return
+    }
+
     if (data && data.length > 0) {
       set({ queue: data, currentIndex: 0 })
     }
   },
 
   playRandomSong: async () => {
-    const { queue, loadAllSongs, destroyHowl, setCurrentSong } = get()
-    
+    const { queue, loadAllSongs, setCurrentSong, _shuffleHistory } = get()
+
     let currentQueue = queue
     if (currentQueue.length === 0) {
       await loadAllSongs()
       currentQueue = get().queue
     }
-    
+
     if (currentQueue.length > 0) {
-      destroyHowl()
-      const randomIndex = Math.floor(Math.random() * currentQueue.length)
-      const randomSong = currentQueue[randomIndex]
-      setCurrentSong(randomSong, currentQueue)
+      const { song, newHistory } = pickRandomSong(currentQueue, _shuffleHistory)
+      set({ _shuffleHistory: newHistory })
+      setCurrentSong(song, currentQueue)
     }
   },
 
   toggleGlobalShuffle: () => {
     const { isGlobalShuffle, queue, loadAllSongs } = get()
     const newState = !isGlobalShuffle
-    
+
     if (newState && queue.length === 0) {
       loadAllSongs()
     }
-    
-    set({ isGlobalShuffle: newState })
+
+    set({ isGlobalShuffle: newState, isShuffle: false, _shuffleHistory: [] })
   },
 
   toggleShuffle: () => {
     const { isShuffle, queue, currentSong } = get()
     const newShuffleState = !isShuffle
-    
+
     if (newShuffleState && queue.length > 1 && currentSong) {
       const otherSongs = queue.filter(s => s.id !== currentSong.id)
       const shuffledOthers = [...otherSongs].sort(() => Math.random() - 0.5)
       const newQueue = [currentSong, ...shuffledOthers]
-      set({ 
-        isShuffle: true, 
+      set({
+        isShuffle: true,
+        isGlobalShuffle: false,
         queue: newQueue,
         currentIndex: 0
       })
@@ -121,65 +164,89 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   setCurrentSong: (song, queue = []) => {
-    // Destruir Howl anterior primeiro
+    // Destrói o Howl anterior e invalida callbacks pendentes dele
     get().destroyHowl()
 
     const finalQueue = queue.length ? queue : [song]
     const currentIndex = finalQueue.findIndex(s => s.id === song.id)
-    
-    let updateProgressFrame: number | null = null
-    let isFirstPlay = true
-    
+
+    // Token desta instância: qualquer callback do Howl só age se o token
+    // ainda for o atual, evitando que uma instância antiga (já destruída)
+    // dispare nextSong() duas vezes e "coma" músicas da fila.
+    const myToken = get()._playToken
+
     const newHowl = new Howl({
       src: [song.url_audio],
       html5: true,
+      preload: true,
       volume: get().volume / 100,
       onend: () => {
-        console.log('🎵 Música terminou:', song.titulo)
-        // Chamar nextSong diretamente, sem setTimeout
+        if (get()._playToken !== myToken) return
+        get()._errorStreak = 0
         get().nextSong()
       },
       onplay: () => {
-        console.log('▶️ Reproduzindo:', song.titulo)
-        set({ isPlaying: true, isLoading: false })
-        
-        // Cancelar frame anterior se existir
-        if (updateProgressFrame) {
-          cancelAnimationFrame(updateProgressFrame)
-        }
-        
-        // Atualizar progresso
-        const updateProgress = () => {
-          const { howl: currentHowl, isPlaying: stillPlaying } = get()
-          if (currentHowl && stillPlaying) {
-            const seek = currentHowl.seek() as number
-            const dur = currentHowl.duration() || 0
-            set({ 
-              currentTime: seek, 
-              duration: dur,
-              progress: dur > 0 ? (seek / dur) * 100 : 0 
-            })
-            updateProgressFrame = requestAnimationFrame(updateProgress)
+        if (get()._playToken !== myToken) return
+        set({ isPlaying: true, isLoading: false, error: null })
+        get()._errorStreak = 0
+
+        const existing = get()._progressInterval
+        if (existing) clearInterval(existing)
+
+        // setInterval continua rodando (ainda que mais devagar) com a aba
+        // em segundo plano, ao contrário de requestAnimationFrame, que
+        // congela completamente quando a aba não está visível.
+        const interval = setInterval(() => {
+          if (get()._playToken !== myToken) {
+            clearInterval(interval)
+            return
           }
-        }
-        updateProgressFrame = requestAnimationFrame(updateProgress)
+          const seek = newHowl.seek()
+          const dur = newHowl.duration() || 0
+          if (typeof seek === 'number') {
+            set({
+              currentTime: seek,
+              duration: dur,
+              progress: dur > 0 ? (seek / dur) * 100 : 0
+            })
+          }
+        }, 500)
+
+        set({ _progressInterval: interval })
       },
       onpause: () => {
+        if (get()._playToken !== myToken) return
         set({ isPlaying: false })
       },
       onload: () => {
-        console.log('✅ Música carregada:', song.titulo)
+        if (get()._playToken !== myToken) return
         set({ duration: newHowl.duration() })
-        if (isFirstPlay) {
-          isFirstPlay = false
-          newHowl.play()
-        }
+        newHowl.play()
+      },
+      onplayerror: () => {
+        if (get()._playToken !== myToken) return
+        // Navegadores podem bloquear autoplay sem gesto do usuário.
+        // Tenta destravar o áudio assim que o usuário interagir com a página.
+        newHowl.once('unlock', () => {
+          if (get()._playToken === myToken) newHowl.play()
+        })
       },
       onloaderror: (id, error) => {
+        if (get()._playToken !== myToken) return
         console.error('❌ Erro ao carregar:', song.titulo, error)
-        set({ isLoading: false })
-        // Tentar próxima música após erro
-        setTimeout(() => get().nextSong(), 500)
+
+        const streak = get()._errorStreak + 1
+        set({ isLoading: false, error: `Não foi possível carregar "${song.titulo}"`, _errorStreak: streak })
+
+        // Limite de tentativas em sequência para não entrar em loop infinito
+        // caso várias faixas seguidas tenham um link quebrado.
+        if (streak >= Math.min(finalQueue.length, 10)) {
+          set({ isPlaying: false, error: 'Várias músicas falharam ao carregar. Reprodução interrompida.' })
+          return
+        }
+        setTimeout(() => {
+          if (get()._playToken === myToken) get().nextSong()
+        }, 500)
       }
     })
 
@@ -190,7 +257,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       currentIndex,
       progress: 0,
       currentTime: 0,
-      isLoading: true
+      isLoading: true,
+      error: null
     })
   },
 
@@ -203,7 +271,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     } else {
       howl.play()
     }
-    set({ isPlaying: !isPlaying })
   },
 
   setVolume: (volume) => {
@@ -218,80 +285,76 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const { howl, duration } = get()
     if (howl && duration > 0) {
       howl.seek(position)
-      set({ 
-        currentTime: position, 
-        progress: duration > 0 ? (position / duration) * 100 : 0 
+      set({
+        currentTime: position,
+        progress: duration > 0 ? (position / duration) * 100 : 0
       })
     }
   },
 
   nextSong: () => {
-    const { queue, currentIndex, setCurrentSong, isRepeat, currentSong, isGlobalShuffle, destroyHowl } = get()
-    
-    console.log('➡️ nextSong - Index:', currentIndex, 'Queue:', queue.length)
-    
+    const { queue, currentIndex, setCurrentSong, isRepeat, currentSong, isGlobalShuffle, _shuffleHistory } = get()
+
     // Modo repetir
     if (isRepeat && currentSong) {
-      console.log('🔄 Modo repeat:', currentSong.titulo)
-      destroyHowl()
       setCurrentSong(currentSong, queue)
       return
     }
-    
-    // Modo aleatório global
-    if (isGlobalShuffle && queue.length === 0) {
-      get().loadAllSongs()
-      setTimeout(() => {
-        const newQueue = get().queue
-        if (newQueue.length > 0) {
-          const randomIndex = Math.floor(Math.random() * newQueue.length)
-          destroyHowl()
-          setCurrentSong(newQueue[randomIndex], newQueue)
+
+    // Modo aleatório global: sempre sorteia a próxima, mesmo com fila carregada
+    if (isGlobalShuffle) {
+      const playNextRandom = (sourceQueue: Musica[]) => {
+        if (sourceQueue.length === 0) {
+          set({ isPlaying: false })
+          return
         }
-      }, 100)
+        const { song, newHistory } = pickRandomSong(sourceQueue, _shuffleHistory, currentSong?.id)
+        set({ _shuffleHistory: newHistory })
+        setCurrentSong(song, sourceQueue)
+      }
+
+      if (queue.length === 0) {
+        get().loadAllSongs().then(() => playNextRandom(get().queue))
+      } else {
+        playNextRandom(queue)
+      }
       return
     }
-    
+
     // Próxima música na fila
     if (currentIndex + 1 < queue.length) {
       const nextSongItem = queue[currentIndex + 1]
-      console.log('⏩ Próxima música:', nextSongItem.titulo)
-      destroyHowl()
-      set({ currentIndex: currentIndex + 1 })
       setCurrentSong(nextSongItem, queue)
-    } 
+    }
     // Reiniciar fila
     else if (queue.length > 0) {
-      console.log('🔄 Reiniciando fila do início')
-      destroyHowl()
-      set({ currentIndex: 0 })
       setCurrentSong(queue[0], queue)
     }
     else {
-      console.log('🏁 Fim da fila, sem músicas')
       set({ isPlaying: false })
     }
   },
 
   previousSong: () => {
-    const { queue, currentIndex, setCurrentSong, currentTime, destroyHowl } = get()
-    
+    const { queue, currentIndex, setCurrentSong, currentTime, isGlobalShuffle } = get()
+
     // Se passou mais de 3 segundos, reinicia a música atual
     if (currentTime > 3) {
-      console.log('🔁 Reiniciando música atual')
       get().seekTo(0)
       return
     }
-    
+
+    if (isGlobalShuffle) {
+      // No modo aleatório global não há "anterior" determinístico: reinicia a atual
+      get().seekTo(0)
+      return
+    }
+
     // Voltar para música anterior
     if (currentIndex - 1 >= 0) {
       const prevSong = queue[currentIndex - 1]
-      console.log('⏪ Música anterior:', prevSong.titulo)
-      destroyHowl()
-      set({ currentIndex: currentIndex - 1 })
       setCurrentSong(prevSong, queue)
     } else {
-      console.log('🔁 Primeira música, reiniciando')
       get().seekTo(0)
       if (!get().isPlaying) {
         get().togglePlay()

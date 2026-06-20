@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Menu, User, ChevronDown, Search } from 'lucide-react'
+import { Menu, User, ChevronDown } from 'lucide-react'
 import { MobileNav } from './MobileNav'
 import { useAuth } from '@/lib/hooks/useAuth'
 import { useRouter } from 'next/navigation'
@@ -33,10 +33,7 @@ export function Header() {
             <SearchBar />
           </div>
 
-          {/* Search Icon - Mobile */}
-          <button className="md:hidden p-2 rounded-xl hover:bg-white/10 transition-all">
-            <Search size={20} />
-          </button>
+          <div className="flex-1 md:hidden" />
 
           {/* Profile Button */}
           <button

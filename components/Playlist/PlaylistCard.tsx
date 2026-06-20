@@ -4,22 +4,15 @@ import Link from 'next/link'
 import { Playlist } from '@/types'
 import Image from 'next/image'
 import { Play } from 'lucide-react'
-import { useState } from 'react'
 
 interface PlaylistCardProps {
   playlist: Playlist
 }
 
 export function PlaylistCard({ playlist }: PlaylistCardProps) {
-  const [isHovered, setIsHovered] = useState(false)
-
   return (
     <Link href={`/playlist/${playlist.id}`}>
-      <div
-        className="group relative bg-white/5 rounded-xl overflow-hidden transition-all duration-300 hover:bg-white/10 hover:scale-105 cursor-pointer"
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
-      >
+      <div className="group relative bg-white/5 rounded-xl overflow-hidden transition-all duration-300 hover:bg-white/10 hover:scale-105 active:scale-[0.98] cursor-pointer">
         <div className="relative aspect-square">
           {playlist.url_capa ? (
             <Image
@@ -34,11 +27,9 @@ export function PlaylistCard({ playlist }: PlaylistCardProps) {
             </div>
           )}
           
-          <div className={`absolute inset-0 bg-black/50 flex items-center justify-center transition-opacity duration-300 ${
-            isHovered ? 'opacity-100' : 'opacity-0'
-          }`}>
-            <div className="bg-white text-black rounded-full p-3 hover:scale-110 transition-transform">
-              <Play size={24} />
+          <div className="absolute inset-0 bg-black/30 md:bg-black/50 flex items-center justify-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-300">
+            <div className="bg-white text-black rounded-full p-3 hover:scale-110 transition-transform shadow-xl">
+              <Play size={24} className="ml-0.5" />
             </div>
           </div>
         </div>

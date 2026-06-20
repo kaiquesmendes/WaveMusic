@@ -333,6 +333,21 @@ export default function ProfilePage() {
     }
   }, [fetchStats])
 
+  // Carrega nome e bio salvos assim que os dados do usuário chegam
+  // (antes disso os campos ficavam sempre vazios, mesmo com dados salvos)
+  useEffect(() => {
+    if (userData) {
+      setNome(userData.nome || '')
+      setBio(userData.bio || '')
+    }
+  }, [userData])
+
+  const handleCancelEdit = useCallback(() => {
+    setNome(userData?.nome || '')
+    setBio(userData?.bio || '')
+    setIsEditing(false)
+  }, [userData])
+
   const handleSave = useCallback(async () => {
     if (!user) return
     setIsSaving(true)
@@ -502,6 +517,19 @@ export default function ProfilePage() {
       <div className="max-w-4xl mx-auto px-4 space-y-8">
         {/* Header Info */}
         <div className="text-center">
+          {/* Avatar - sobrepõe a borda do banner, como em apps de música conhecidos */}
+          <div className="relative w-24 h-24 md:w-28 md:h-28 mx-auto -mt-16 md:-mt-20 mb-4 rounded-full ring-4 ring-black overflow-hidden shadow-2xl">
+            {userData?.avatar_url ? (
+              <Image src={userData.avatar_url} alt={nome || 'Avatar'} fill className="object-cover" />
+            ) : (
+              <div className={`w-full h-full bg-gradient-to-br ${getLevelColor()} flex items-center justify-center`}>
+                <span className="text-3xl md:text-4xl font-bold text-white">
+                  {(nome || user?.email || 'U')[0]?.toUpperCase()}
+                </span>
+              </div>
+            )}
+          </div>
+
           {isEditing ? (
             <input
               type="text"
@@ -669,7 +697,7 @@ export default function ProfilePage() {
           ) : (
             <>
               <button
-                onClick={() => setIsEditing(false)}
+                onClick={handleCancelEdit}
                 className="flex-1 bg-white/10 hover:bg-white/20 py-3 rounded-xl font-medium transition-all duration-300 flex items-center justify-center gap-2"
               >
                 <X size={18} />

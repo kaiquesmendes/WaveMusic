@@ -23,7 +23,8 @@ export function PlayerBar() {
     togglePlay,
     isGlobalShuffle,
     toggleGlobalShuffle,
-    playRandomSong
+    playRandomSong,
+    error
   } = usePlayerStore()
   const { favorites, toggleFavorite } = useFavorites()
   const { user } = useAuth()
@@ -172,7 +173,12 @@ export function PlayerBar() {
   }
 
   return (
-    <div className="flex-shrink-0 bg-black/80 backdrop-blur-xl border-t border-white/10 py-3 px-4">
+    <div className="flex-shrink-0 bg-black/80 backdrop-blur-xl border-t border-white/10 py-3 px-4 relative">
+      {error && (
+        <div className="absolute -top-2 left-1/2 -translate-x-1/2 -translate-y-full bg-red-500/90 backdrop-blur-sm text-white text-xs font-medium px-4 py-2 rounded-xl shadow-lg animate-slide-up max-w-[90vw] text-center">
+          {error}
+        </div>
+      )}
       <div className="max-w-7xl mx-auto">
         {/* Progress Bar superior */}
         <div className="w-full mb-2">
