@@ -183,11 +183,12 @@ export function SearchBar({ onSearch, initialValue = '', onResultClick }: Search
   }, [onSearch])
 
   const handleMusicClick = useCallback((music: Musica) => {
-    setCurrentSong(music)
+    // A fila passa a ser a lista de resultados da busca
+    setCurrentSong(music, results)
     setIsOpen(false)
     setQuery('')
     if (onResultClick) onResultClick(music)
-  }, [setCurrentSong, onResultClick])
+  }, [setCurrentSong, onResultClick, results])
 
   const handleArtistaClick = useCallback((artista: string) => {
     setIsOpen(false)

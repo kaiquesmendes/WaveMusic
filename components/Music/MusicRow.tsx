@@ -13,9 +13,11 @@ interface MusicRowProps {
   index: number
   showImage?: boolean
   showAlbum?: boolean
+  // Lista de onde a linha faz parte; vira a fila de reprodução
+  queue?: Musica[]
 }
 
-export function MusicRow({ music, index, showImage = false, showAlbum = false }: MusicRowProps) {
+export function MusicRow({ music, index, showImage = false, showAlbum = false, queue }: MusicRowProps) {
   const { setCurrentSong } = usePlayerStore()
   const { favorites, toggleFavorite } = useFavorites()
   const [isHovered, setIsHovered] = useState(false)
@@ -29,7 +31,7 @@ export function MusicRow({ music, index, showImage = false, showAlbum = false }:
     >
       <div className="col-span-1 text-gray-400 text-sm">
         {isHovered ? (
-          <button onClick={() => setCurrentSong(music)} className="text-white">
+          <button onClick={() => setCurrentSong(music, queue)} className="text-white">
             <Play size={14} />
           </button>
         ) : (

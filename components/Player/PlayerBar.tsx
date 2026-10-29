@@ -6,32 +6,25 @@ import { VolumeControl } from './VolumeControl'
 import { ProgressBar } from './ProgressBar'
 import { formatTime } from '@/lib/utils/formatTime'
 import Image from 'next/image'
-import { Heart, SkipForward, SkipBack, Play, Pause, Radio, Loader2 } from 'lucide-react'
+import { Heart, Loader2 } from 'lucide-react'
 import { useFavorites } from '@/lib/hooks/useFavorites'
 import { useEffect, useRef, useCallback, useMemo } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/hooks/useAuth'
 
 export function PlayerBar() {
-  const { 
-    currentSong, 
-    duration, 
-    currentTime, 
-    isPlaying, 
-    nextSong, 
-    previousSong,
-    togglePlay,
-    isGlobalShuffle,
-    toggleGlobalShuffle,
-    playRandomSong,
+  const {
+    currentSong,
+    duration,
+    currentTime,
+    isPlaying,
+    isLoading,
     error
   } = usePlayerStore()
   const { favorites, toggleFavorite } = useFavorites()
   const { user } = useAuth()
   const hasSavedRef = useRef<string>('')
   const saveTimeoutRef = useRef<NodeJS.Timeout>()
-  const [isBuffering, setIsBuffering] = useState(false)
-  const isMountedRef = useRef(true)
 
   // SALVAR NO HISTÓRICO - Otimizado
   const saveToHistory = useCallback(async () => {
@@ -69,80 +62,63 @@ export function PlayerBar() {
 
   useEffect(() => {
     hasSavedRef.current = ''
-    setIsBuffering(false)
   }, [currentSong?.id])
 
-  // Media Session API - Combinado em um único efeito
+  // Media Session API (tela de bloqueio / teclas de mídia).
+  // Os handlers chamam a store direto via getState(), então não dependem de
+  // currentTime e não precisam ser recriados a cada atualização de progresso.
   useEffect(() => {
-    if (!currentSong) return
+    if (!currentSong || !('mediaSession' in navigator)) return
 
-    const updateMediaSession = () => {
-      if (!('mediaSession' in navigator)) return
-      
-      try {
-        navigator.mediaSession.metadata = new MediaMetadata({
-          title: currentSong.titulo,
-          artist: currentSong.artista,
-          album: currentSong.album || 'WaveMusic',
-          artwork: [
-            { src: currentSong.url_capa || '/images/default-album.svg', sizes: '96x96', type: 'image/jpeg' },
-            { src: currentSong.url_capa || '/images/default-album.svg', sizes: '128x128', type: 'image/jpeg' },
-            { src: currentSong.url_capa || '/images/default-album.svg', sizes: '192x192', type: 'image/jpeg' },
-            { src: currentSong.url_capa || '/images/default-album.svg', sizes: '256x256', type: 'image/jpeg' },
-            { src: currentSong.url_capa || '/images/default-album.svg', sizes: '384x384', type: 'image/jpeg' },
-            { src: currentSong.url_capa || '/images/default-album.svg', sizes: '512x512', type: 'image/jpeg' }
-          ]
-        })
+    const cover = currentSong.url_capa || '/images/default-album.svg'
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: currentSong.titulo,
+        artist: currentSong.artista,
+        album: currentSong.album || 'WaveMusic',
+        artwork: ['96x96', '128x128', '192x192', '256x256', '384x384', '512x512'].map(sizes => ({
+          src: cover,
+          sizes,
+          type: 'image/jpeg'
+        }))
+      })
 
-        navigator.mediaSession.setActionHandler('play', () => togglePlay())
-        navigator.mediaSession.setActionHandler('pause', () => togglePlay())
-        navigator.mediaSession.setActionHandler('previoustrack', () => previousSong())
-        navigator.mediaSession.setActionHandler('nexttrack', () => nextSong())
-        navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused'
-        
-        if (duration > 0) {
-          navigator.mediaSession.setPositionState({
-            duration: duration,
-            position: currentTime,
-            playbackRate: 1
-          })
-        }
-      } catch (error) {}
-    }
-
-    updateMediaSession()
+      const player = () => usePlayerStore.getState()
+      navigator.mediaSession.setActionHandler('play', () => player().togglePlay())
+      navigator.mediaSession.setActionHandler('pause', () => player().togglePlay())
+      navigator.mediaSession.setActionHandler('previoustrack', () => player().previousSong())
+      navigator.mediaSession.setActionHandler('nexttrack', () => player().nextSong())
+      navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (typeof details.seekTime === 'number') player().seekTo(details.seekTime)
+      })
+    } catch (error) {}
 
     return () => {
-      if ('mediaSession' in navigator) {
-        try {
-          navigator.mediaSession.setActionHandler('play', null)
-          navigator.mediaSession.setActionHandler('pause', null)
-          navigator.mediaSession.setActionHandler('previoustrack', null)
-          navigator.mediaSession.setActionHandler('nexttrack', null)
-        } catch (error) {}
-      }
+      try {
+        navigator.mediaSession.setActionHandler('play', null)
+        navigator.mediaSession.setActionHandler('pause', null)
+        navigator.mediaSession.setActionHandler('previoustrack', null)
+        navigator.mediaSession.setActionHandler('nexttrack', null)
+        navigator.mediaSession.setActionHandler('seekto', null)
+      } catch (error) {}
     }
-  }, [currentSong, isPlaying, currentTime, duration, togglePlay, previousSong, nextSong])
+  }, [currentSong])
 
-  // Simular buffering (quando a música está carregando)
+  // Estado de reprodução e posição: só quando muda play/pause ou a duração
+  // (o navegador extrapola a posição sozinho a partir daí)
   useEffect(() => {
-    if (!currentSong) return
-    
-    // Simular loading da música (Howl.js tem evento onload, mas é complexo)
-    const timer = setTimeout(() => setIsBuffering(false), 500)
-    setIsBuffering(true)
-    
-    return () => clearTimeout(timer)
-  }, [currentSong?.id])
-
-  const handleGlobalShuffle = useCallback(async () => {
-    if (!isGlobalShuffle) {
-      await toggleGlobalShuffle()
-      await playRandomSong()
-    } else {
-      toggleGlobalShuffle()
-    }
-  }, [isGlobalShuffle, toggleGlobalShuffle, playRandomSong])
+    if (!currentSong || !('mediaSession' in navigator)) return
+    try {
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused'
+      if (duration > 0) {
+        navigator.mediaSession.setPositionState({
+          duration,
+          position: Math.min(usePlayerStore.getState().currentTime, duration),
+          playbackRate: 1
+        })
+      }
+    } catch (error) {}
+  }, [currentSong, isPlaying, duration])
 
   const handleToggleFavorite = useCallback(() => {
     if (currentSong) toggleFavorite(currentSong.id)
@@ -205,7 +181,7 @@ export function PlayerBar() {
               ) : (
                 <div className="w-full h-full bg-gradient-to-br from-purple-500 to-pink-500" />
               )}
-              {isBuffering && (
+              {isLoading && (
                 <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
                   <Loader2 size={16} className="text-white animate-spin" />
                 </div>
@@ -228,52 +204,8 @@ export function PlayerBar() {
             </button>
           </div>
 
-          {/* Controles Centrais */}
-          <div className="flex items-center justify-center gap-2 md:gap-4">
-            {/* Modo Aleatório Global */}
-            <button
-              onClick={handleGlobalShuffle}
-              className={`p-2 rounded-full transition-all duration-300 ${
-                isGlobalShuffle 
-                  ? 'text-purple-400 bg-purple-500/20 shadow-lg shadow-purple-500/20' 
-                  : 'text-gray-400 hover:text-white hover:bg-white/10'
-              }`}
-              title={isGlobalShuffle ? 'Desativar modo aleatório' : 'Ativar modo aleatório - tocar todas as músicas'}
-              aria-label="Modo aleatório global"
-            >
-              <Radio size={18} />
-            </button>
-
-            {/* Anterior */}
-            <button
-              onClick={previousSong}
-              className="p-2 rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-all duration-300"
-              title="Música anterior"
-              aria-label="Anterior"
-            >
-              <SkipBack size={20} />
-            </button>
-
-            {/* Play/Pause */}
-            <button
-              onClick={togglePlay}
-              className="bg-white text-black rounded-full p-3 hover:scale-105 transition-all duration-300 shadow-lg"
-              title={isPlaying ? 'Pausar' : 'Tocar'}
-              aria-label={isPlaying ? 'Pausar' : 'Tocar'}
-            >
-              {isPlaying ? <Pause size={20} /> : <Play size={20} className="ml-0.5" />}
-            </button>
-
-            {/* Próxima */}
-            <button
-              onClick={nextSong}
-              className="p-2 rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-all duration-300"
-              title="Próxima música"
-              aria-label="Próxima"
-            >
-              <SkipForward size={20} />
-            </button>
-          </div>
+          {/* Controles Centrais: rádio, aleatório, anterior, play/pause, próxima, repetir */}
+          <PlayerControls />
 
           {/* Volume */}
           <div className="min-w-[100px] flex justify-end">
@@ -284,6 +216,3 @@ export function PlayerBar() {
     </div>
   )
 }
-
-// Adicionar useState
-import { useState } from 'react'

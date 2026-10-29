@@ -42,7 +42,7 @@ export function MusicGrid({ musicas, loading = false, variant = 'default' }: Mus
   return (
     <div className={gridClasses}>
       {musicas.map((music) => (
-        <MusicCard key={music.id} music={music} variant={variant === 'compact' ? 'compact' : 'default'} />
+        <MusicCard key={music.id} music={music} queue={musicas} variant={variant === 'compact' ? 'compact' : 'default'} />
       ))}
     </div>
   )

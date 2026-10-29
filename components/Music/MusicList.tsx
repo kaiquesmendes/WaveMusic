@@ -24,6 +24,7 @@ export function MusicList({ musicas, showImage = false, showAlbum = false }: Mus
         <MusicRow
           key={musica.id}
           music={musica}
+          queue={musicas}
           index={index + 1}
           showImage={showImage}
           showAlbum={showAlbum}

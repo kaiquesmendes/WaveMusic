@@ -27,7 +27,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true)
   const [currentFeaturedIndex, setCurrentFeaturedIndex] = useState(0)
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const { setCurrentSong, toggleGlobalShuffle, playRandomSong, isGlobalShuffle } = usePlayerStore()
+  const { setCurrentSong, toggleGlobalShuffle, isGlobalShuffle } = usePlayerStore()
   const { user } = useAuth()
   const carouselIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const isMountedRef = useRef(true)
@@ -207,14 +207,10 @@ export default function HomePage() {
     fetchAllData(true) // Force refresh
   }, [fetchAllData])
 
-  const handleGlobalShuffle = useCallback(async () => {
-    if (!isGlobalShuffle) {
-      await toggleGlobalShuffle()
-      await playRandomSong()
-    } else {
-      toggleGlobalShuffle()
-    }
-  }, [isGlobalShuffle, toggleGlobalShuffle, playRandomSong])
+  // Liga/desliga a "Rádio" (biblioteca inteira no aleatório)
+  const handleGlobalShuffle = useCallback(() => {
+    toggleGlobalShuffle()
+  }, [toggleGlobalShuffle])
 
   const currentFeatured = featuredSongs[currentFeaturedIndex]
 

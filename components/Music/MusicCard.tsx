@@ -10,9 +10,11 @@ import { useState } from 'react'
 interface MusicCardProps {
   music: Musica
   variant?: 'default' | 'compact' | 'featured'
+  // Lista de onde o card faz parte (seção, playlist, álbum...). É ela que vira a fila de reprodução.
+  queue?: Musica[]
 }
 
-export function MusicCard({ music, variant = 'default' }: MusicCardProps) {
+export function MusicCard({ music, variant = 'default', queue }: MusicCardProps) {
   const { setCurrentSong, currentSong, isPlaying } = usePlayerStore()
   const { favorites, toggleFavorite } = useFavorites()
   const [imgError, setImgError] = useState(false)
@@ -47,7 +49,7 @@ export function MusicCard({ music, variant = 'default' }: MusicCardProps) {
         {/* Botão de play: sempre visível no mobile (sem hover), só revela no hover em telas md+ */}
         <div className="absolute inset-0 bg-black/40 md:bg-black/50 flex items-center justify-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-300">
           <button
-            onClick={() => setCurrentSong(music)}
+            onClick={() => setCurrentSong(music, queue)}
             className="bg-white text-black rounded-full p-4 hover:scale-110 active:scale-95 transition-transform shadow-2xl"
             aria-label={`Tocar ${music.titulo}`}
           >
@@ -65,7 +67,7 @@ export function MusicCard({ music, variant = 'default' }: MusicCardProps) {
         className={`flex items-center gap-3 p-2 rounded-xl active:bg-white/10 hover:bg-white/5 transition-all cursor-pointer group ${
           isCurrent ? 'bg-purple-500/10' : ''
         }`}
-        onClick={() => setCurrentSong(music)}
+        onClick={() => setCurrentSong(music, queue)}
       >
         <div className="relative w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 shadow-md">
           <Image
@@ -111,7 +113,7 @@ export function MusicCard({ music, variant = 'default' }: MusicCardProps) {
   return (
     <div
       className="group relative bg-white/5 rounded-xl overflow-hidden transition-all duration-300 hover:bg-white/10 hover:scale-[1.03] active:scale-[0.98] hover:shadow-2xl cursor-pointer"
-      onClick={() => setCurrentSong(music)}
+      onClick={() => setCurrentSong(music, queue)}
     >
       <div className="relative aspect-square">
         <Image
@@ -129,7 +131,7 @@ export function MusicCard({ music, variant = 'default' }: MusicCardProps) {
           <button
             onClick={(e) => {
               e.stopPropagation()
-              setCurrentSong(music)
+              setCurrentSong(music, queue)
             }}
             className="bg-white text-black rounded-full p-3 hover:scale-110 active:scale-95 transition-transform shadow-xl"
             aria-label={`Tocar ${music.titulo}`}

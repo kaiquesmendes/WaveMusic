@@ -1,28 +1,28 @@
 import { create } from 'zustand'
-import { Howl } from 'howler'
 import { Musica } from '@/types'
+
+export type RepeatMode = 'off' | 'all' | 'one'
 
 interface PlayerState {
   currentSong: Musica | null
   isPlaying: boolean
-  progress: number
-  volume: number
-  duration: number
-  currentTime: number
-  queue: Musica[]
-  currentIndex: number
-  howl: Howl | null
-  isShuffle: boolean
-  isRepeat: boolean
-  isGlobalShuffle: boolean
   isLoading: boolean
   error: string | null
+  progress: number
+  currentTime: number
+  duration: number
+  volume: number
 
-  // controle interno (não usar fora da store)
-  _playToken: number
-  _progressInterval: ReturnType<typeof setInterval> | null
-  _shuffleHistory: string[]
-  _errorStreak: number
+  // Contexto de reprodução (como no Spotify):
+  //  - originalQueue: a lista de onde a música foi tocada (playlist, álbum, seção da tela...), na ordem original
+  //  - queue: a ordem em que as músicas realmente tocam (embaralhada quando o shuffle está ligado)
+  originalQueue: Musica[]
+  queue: Musica[]
+  currentIndex: number
+  isShuffle: boolean
+  repeatMode: RepeatMode
+  // true quando o contexto atual é a biblioteca inteira ("Rádio")
+  isGlobalShuffle: boolean
 
   setCurrentSong: (song: Musica, queue?: Musica[]) => void
   togglePlay: () => void
@@ -32,333 +32,374 @@ interface PlayerState {
   previousSong: () => void
   toggleShuffle: () => void
   toggleRepeat: () => void
-  toggleGlobalShuffle: () => void
-  loadAllSongs: () => Promise<void>
-  playRandomSong: () => Promise<void>
-  destroyHowl: () => void
+  toggleGlobalShuffle: () => Promise<void>
+  playAllShuffled: (songs?: Musica[]) => Promise<void>
 }
 
-// Escolhe a próxima música aleatória evitando repetir até esgotar a lista
-function pickRandomSong(queue: Musica[], history: string[], excludeId?: string): { song: Musica; newHistory: string[] } {
-  const candidates = queue.filter(s => s.id !== excludeId)
-  let pool = candidates.filter(s => !history.includes(s.id))
+/* ------------------------------------------------------------------ */
+/* Helpers                                                             */
+/* ------------------------------------------------------------------ */
 
-  // Já tocou todas as outras músicas -> reinicia o histórico
-  if (pool.length === 0) {
-    pool = candidates.length > 0 ? candidates : queue
-    history = []
+// Fisher–Yates: embaralhamento uniforme (sort(() => Math.random() - 0.5) é enviesado)
+function shuffleArray<T>(items: T[]): T[] {
+  const arr = [...items]
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[arr[i], arr[j]] = [arr[j], arr[i]]
   }
-
-  const song = pool[Math.floor(Math.random() * pool.length)]
-  return { song, newHistory: [...history, song.id] }
+  return arr
 }
 
-export const usePlayerStore = create<PlayerState>((set, get) => ({
-  currentSong: null,
-  isPlaying: false,
-  progress: 0,
-  volume: 70,
-  duration: 0,
-  currentTime: 0,
-  queue: [],
-  currentIndex: -1,
-  howl: null,
-  isShuffle: false,
-  isRepeat: false,
-  isGlobalShuffle: false,
-  isLoading: false,
-  error: null,
+// Ordem de reprodução embaralhada. Se `first` for informada, ela vem na frente
+// e o restante é embaralhado depois dela; se `avoidFirstId` for informado, a
+// primeira faixa nunca será essa (evita repetir a música que acabou de tocar).
+function buildShuffledOrder(source: Musica[], first?: Musica | null, avoidFirstId?: string): Musica[] {
+  if (first) {
+    const rest = shuffleArray(source.filter(s => s.id !== first.id))
+    return [first, ...rest]
+  }
+  const order = shuffleArray(source)
+  if (avoidFirstId && order.length > 1 && order[0].id === avoidFirstId) {
+    const swapWith = 1 + Math.floor(Math.random() * (order.length - 1))
+    ;[order[0], order[swapWith]] = [order[swapWith], order[0]]
+  }
+  return order
+}
 
-  _playToken: 0,
-  _progressInterval: null,
-  _shuffleHistory: [],
-  _errorStreak: 0,
+/* ------------------------------------------------------------------ */
+/* Motor de áudio                                                      */
+/* ------------------------------------------------------------------ */
+// Um ÚNICO elemento <audio> vive durante toda a sessão e só troca o `src`.
+// Criar um player novo a cada faixa faz navegadores móveis (principalmente
+// iOS/Safari) bloquearem o autoplay da próxima música, porque o elemento novo
+// nunca recebeu um toque do usuário. Reaproveitar o mesmo elemento mantém o
+// áudio "destravado" e a fila avança sozinha de forma confiável.
 
-  destroyHowl: () => {
-    const { howl, _progressInterval } = get()
+let audioEl: HTMLAudioElement | null = null
+let errorStreak = 0
+let loadingLibrary = false
+// Uma faixa quebrada gera DOIS sinais no navegador (evento "error" e a rejeição
+// do play()); este id garante que a mesma falha seja contada uma única vez.
+let failedSongId: string | null = null
 
-    // Invalida qualquer callback "zumbi" de uma instância antiga do Howl
-    set({ _playToken: get()._playToken + 1 })
+function isAbortError(err: unknown) {
+  return !!err && typeof err === 'object' && (err as { name?: string }).name === 'AbortError'
+}
 
-    if (_progressInterval) {
-      clearInterval(_progressInterval)
-    }
+export const usePlayerStore = create<PlayerState>((set, get) => {
+  /* ---------- controle do elemento <audio> ---------- */
 
-    if (howl) {
-      try {
-        howl.off() // remove todos os listeners antes de descarregar
-        howl.stop()
-        howl.unload()
-      } catch (e) {
-        console.error('Erro ao destruir Howl:', e)
-      }
-    }
-
-    set({ howl: null, _progressInterval: null })
-  },
-
-  loadAllSongs: async () => {
-    const supabaseAny = (await import('@/lib/supabase/client')).supabase as any
-    const { data, error } = await supabaseAny
-      .from('musicas')
-      .select('*')
-
-    if (error) {
-      console.error('Erro ao carregar músicas:', error)
+  function handlePlayError(err: unknown) {
+    // Trocar de faixa rapidamente interrompe o play() anterior: é esperado.
+    if (isAbortError(err)) return
+    // Arquivo inexistente/indisponível: tratado como faixa quebrada (pula para a próxima)
+    if (err && typeof err === 'object' && (err as { name?: string }).name === 'NotSupportedError') {
+      handleLoadFailure()
       return
     }
+    set({
+      isPlaying: false,
+      isLoading: false,
+      error: 'Não foi possível iniciar a reprodução. Toque em play para tentar novamente.'
+    })
+  }
 
-    if (data && data.length > 0) {
-      set({ queue: data, currentIndex: 0 })
+  // Faixa que não carrega: avisa e pula para a próxima, com limite de falhas seguidas.
+  function handleLoadFailure() {
+    const failed = get().currentSong
+    if (!failed || failedSongId === failed.id) return
+    failedSongId = failed.id
+
+    errorStreak += 1
+    set({ isLoading: false, isPlaying: false, error: `Não foi possível carregar "${failed.titulo}"` })
+
+    // Limite de falhas seguidas para não entrar em loop infinito quando
+    // várias faixas em sequência têm o link quebrado.
+    if (errorStreak >= Math.min(get().queue.length, 10)) {
+      set({ error: 'Várias músicas falharam ao carregar. Reprodução interrompida.' })
+      return
     }
-  },
+    setTimeout(() => {
+      if (get().currentSong?.id === failed.id) advance(true)
+    }, 500)
+  }
 
-  playRandomSong: async () => {
-    const { queue, loadAllSongs, setCurrentSong, _shuffleHistory } = get()
+  function getAudio(): HTMLAudioElement | null {
+    if (typeof window === 'undefined') return null
+    if (audioEl) return audioEl
 
-    let currentQueue = queue
-    if (currentQueue.length === 0) {
-      await loadAllSongs()
-      currentQueue = get().queue
-    }
+    const a = new Audio()
+    a.preload = 'auto'
+    a.volume = get().volume / 100
+    audioEl = a
 
-    if (currentQueue.length > 0) {
-      const { song, newHistory } = pickRandomSong(currentQueue, _shuffleHistory)
-      set({ _shuffleHistory: newHistory })
-      setCurrentSong(song, currentQueue)
-    }
-  },
-
-  toggleGlobalShuffle: () => {
-    const { isGlobalShuffle, queue, loadAllSongs } = get()
-    const newState = !isGlobalShuffle
-
-    if (newState && queue.length === 0) {
-      loadAllSongs()
-    }
-
-    set({ isGlobalShuffle: newState, isShuffle: false, _shuffleHistory: [] })
-  },
-
-  toggleShuffle: () => {
-    const { isShuffle, queue, currentSong } = get()
-    const newShuffleState = !isShuffle
-
-    if (newShuffleState && queue.length > 1 && currentSong) {
-      const otherSongs = queue.filter(s => s.id !== currentSong.id)
-      const shuffledOthers = [...otherSongs].sort(() => Math.random() - 0.5)
-      const newQueue = [currentSong, ...shuffledOthers]
+    a.addEventListener('loadedmetadata', () => {
+      if (isFinite(a.duration)) set({ duration: a.duration })
+    })
+    a.addEventListener('durationchange', () => {
+      if (isFinite(a.duration)) set({ duration: a.duration })
+    })
+    a.addEventListener('timeupdate', () => {
+      const dur = isFinite(a.duration) ? a.duration : 0
       set({
-        isShuffle: true,
-        isGlobalShuffle: false,
-        queue: newQueue,
-        currentIndex: 0
+        currentTime: a.currentTime,
+        duration: dur || get().duration,
+        progress: dur > 0 ? (a.currentTime / dur) * 100 : 0
       })
-    } else {
-      set({ isShuffle: false })
-    }
-  },
-
-  toggleRepeat: () => {
-    set({ isRepeat: !get().isRepeat })
-  },
-
-  setCurrentSong: (song, queue = []) => {
-    // Destrói o Howl anterior e invalida callbacks pendentes dele
-    get().destroyHowl()
-
-    const finalQueue = queue.length ? queue : [song]
-    const currentIndex = finalQueue.findIndex(s => s.id === song.id)
-
-    // Token desta instância: qualquer callback do Howl só age se o token
-    // ainda for o atual, evitando que uma instância antiga (já destruída)
-    // dispare nextSong() duas vezes e "coma" músicas da fila.
-    const myToken = get()._playToken
-
-    const newHowl = new Howl({
-      src: [song.url_audio],
-      html5: true,
-      preload: true,
-      volume: get().volume / 100,
-      onend: () => {
-        if (get()._playToken !== myToken) return
-        get()._errorStreak = 0
-        get().nextSong()
-      },
-      onplay: () => {
-        if (get()._playToken !== myToken) return
-        set({ isPlaying: true, isLoading: false, error: null })
-        get()._errorStreak = 0
-
-        const existing = get()._progressInterval
-        if (existing) clearInterval(existing)
-
-        // setInterval continua rodando (ainda que mais devagar) com a aba
-        // em segundo plano, ao contrário de requestAnimationFrame, que
-        // congela completamente quando a aba não está visível.
-        const interval = setInterval(() => {
-          if (get()._playToken !== myToken) {
-            clearInterval(interval)
-            return
-          }
-          const seek = newHowl.seek()
-          const dur = newHowl.duration() || 0
-          if (typeof seek === 'number') {
-            set({
-              currentTime: seek,
-              duration: dur,
-              progress: dur > 0 ? (seek / dur) * 100 : 0
-            })
-          }
-        }, 500)
-
-        set({ _progressInterval: interval })
-      },
-      onpause: () => {
-        if (get()._playToken !== myToken) return
-        set({ isPlaying: false })
-      },
-      onload: () => {
-        if (get()._playToken !== myToken) return
-        set({ duration: newHowl.duration() })
-        newHowl.play()
-      },
-      onplayerror: () => {
-        if (get()._playToken !== myToken) return
-        // Navegadores podem bloquear autoplay sem gesto do usuário.
-        // Tenta destravar o áudio assim que o usuário interagir com a página.
-        newHowl.once('unlock', () => {
-          if (get()._playToken === myToken) newHowl.play()
-        })
-      },
-      onloaderror: (id, error) => {
-        if (get()._playToken !== myToken) return
-        console.error('❌ Erro ao carregar:', song.titulo, error)
-
-        const streak = get()._errorStreak + 1
-        set({ isLoading: false, error: `Não foi possível carregar "${song.titulo}"`, _errorStreak: streak })
-
-        // Limite de tentativas em sequência para não entrar em loop infinito
-        // caso várias faixas seguidas tenham um link quebrado.
-        if (streak >= Math.min(finalQueue.length, 10)) {
-          set({ isPlaying: false, error: 'Várias músicas falharam ao carregar. Reprodução interrompida.' })
-          return
-        }
-        setTimeout(() => {
-          if (get()._playToken === myToken) get().nextSong()
-        }, 500)
+    })
+    a.addEventListener('waiting', () => set({ isLoading: true }))
+    a.addEventListener('canplay', () => set({ isLoading: false }))
+    a.addEventListener('play', () => set({ isPlaying: true }))
+    a.addEventListener('playing', () => {
+      errorStreak = 0
+      set({ isPlaying: true, isLoading: false, error: null })
+    })
+    a.addEventListener('pause', () => {
+      // Ao chegar no fim o navegador dispara "pause" antes de "ended":
+      // não piscar o botão de play entre duas músicas.
+      if (a.ended) return
+      set({ isPlaying: false })
+    })
+    a.addEventListener('ended', () => {
+      if (get().repeatMode === 'one') {
+        a.currentTime = 0
+        a.play().catch(handlePlayError)
+        return
       }
+      advance(true)
+    })
+    a.addEventListener('error', () => {
+      // MEDIA_ERR_ABORTED (1) acontece ao trocar de faixa: não é erro de verdade
+      if (!a.error || a.error.code === 1) return
+      handleLoadFailure()
     })
 
+    return a
+  }
+
+  // Carrega uma faixa no elemento de áudio. `autoplay=false` deixa pausada.
+  function loadTrack(song: Musica, autoplay: boolean) {
+    const a = getAudio()
+    failedSongId = null
     set({
       currentSong: song,
-      howl: newHowl,
-      queue: finalQueue,
-      currentIndex,
+      isLoading: autoplay,
+      error: null,
       progress: 0,
       currentTime: 0,
-      isLoading: true,
-      error: null
+      duration: song.duracao || 0
     })
-  },
+    if (!a) return
 
-  togglePlay: () => {
-    const { howl, isPlaying, isLoading } = get()
-    if (!howl || isLoading) return
-
-    if (isPlaying) {
-      howl.pause()
+    a.src = song.url_audio
+    if (autoplay) {
+      a.play().catch(handlePlayError)
     } else {
-      howl.play()
-    }
-  },
-
-  setVolume: (volume) => {
-    const { howl } = get()
-    if (howl) {
-      howl.volume(volume / 100)
-    }
-    set({ volume })
-  },
-
-  seekTo: (position) => {
-    const { howl, duration } = get()
-    if (howl && duration > 0) {
-      howl.seek(position)
-      set({
-        currentTime: position,
-        progress: duration > 0 ? (position / duration) * 100 : 0
-      })
-    }
-  },
-
-  nextSong: () => {
-    const { queue, currentIndex, setCurrentSong, isRepeat, currentSong, isGlobalShuffle, _shuffleHistory } = get()
-
-    // Modo repetir
-    if (isRepeat && currentSong) {
-      setCurrentSong(currentSong, queue)
-      return
-    }
-
-    // Modo aleatório global: sempre sorteia a próxima, mesmo com fila carregada
-    if (isGlobalShuffle) {
-      const playNextRandom = (sourceQueue: Musica[]) => {
-        if (sourceQueue.length === 0) {
-          set({ isPlaying: false })
-          return
-        }
-        const { song, newHistory } = pickRandomSong(sourceQueue, _shuffleHistory, currentSong?.id)
-        set({ _shuffleHistory: newHistory })
-        setCurrentSong(song, sourceQueue)
-      }
-
-      if (queue.length === 0) {
-        get().loadAllSongs().then(() => playNextRandom(get().queue))
-      } else {
-        playNextRandom(queue)
-      }
-      return
-    }
-
-    // Próxima música na fila
-    if (currentIndex + 1 < queue.length) {
-      const nextSongItem = queue[currentIndex + 1]
-      setCurrentSong(nextSongItem, queue)
-    }
-    // Reiniciar fila
-    else if (queue.length > 0) {
-      setCurrentSong(queue[0], queue)
-    }
-    else {
       set({ isPlaying: false })
     }
-  },
+  }
 
-  previousSong: () => {
-    const { queue, currentIndex, setCurrentSong, currentTime, isGlobalShuffle } = get()
+  function playIndex(index: number) {
+    const { queue } = get()
+    const song = queue[index]
+    if (!song) return
+    set({ currentIndex: index })
+    loadTrack(song, true)
+  }
 
-    // Se passou mais de 3 segundos, reinicia a música atual
-    if (currentTime > 3) {
-      get().seekTo(0)
+  // Avança para a próxima faixa.
+  // auto=true  -> a faixa terminou sozinha
+  // auto=false -> o usuário clicou em "próxima"
+  function advance(auto: boolean) {
+    const { queue, originalQueue, currentIndex, repeatMode, isShuffle } = get()
+    if (queue.length === 0) return
+
+    const next = currentIndex + 1
+    if (next < queue.length) {
+      playIndex(next)
       return
     }
 
-    if (isGlobalShuffle) {
-      // No modo aleatório global não há "anterior" determinístico: reinicia a atual
-      get().seekTo(0)
-      return
-    }
-
-    // Voltar para música anterior
-    if (currentIndex - 1 >= 0) {
-      const prevSong = queue[currentIndex - 1]
-      setCurrentSong(prevSong, queue)
-    } else {
-      get().seekTo(0)
-      if (!get().isPlaying) {
-        get().togglePlay()
+    // Chegou ao fim da fila
+    if (repeatMode === 'all' || !auto) {
+      if (isShuffle && queue.length > 1) {
+        // Novo ciclo: reembaralha, sem começar pela música que acabou de tocar
+        const order = buildShuffledOrder(originalQueue.length ? originalQueue : queue, null, queue[currentIndex]?.id)
+        set({ queue: order })
       }
+      playIndex(0)
+      return
+    }
+
+    // repeat desligado e a fila acabou sozinha: para e deixa a 1ª faixa pronta (como o Spotify)
+    set({ currentIndex: 0 })
+    loadTrack(queue[0], false)
+  }
+
+  /* ---------- estado e ações públicas ---------- */
+
+  return {
+    currentSong: null,
+    isPlaying: false,
+    isLoading: false,
+    error: null,
+    progress: 0,
+    currentTime: 0,
+    duration: 0,
+    volume: 70,
+
+    originalQueue: [],
+    queue: [],
+    currentIndex: -1,
+    isShuffle: false,
+    repeatMode: 'off',
+    isGlobalShuffle: false,
+
+    setCurrentSong: (song, queue) => {
+      errorStreak = 0
+
+      // Sem lista informada: se a música já está na fila atual, mantém o contexto
+      // e a ordem; caso contrário toca só ela.
+      if (!queue || queue.length === 0) {
+        const idx = get().queue.findIndex(s => s.id === song.id)
+        if (idx >= 0) {
+          set({ currentIndex: idx })
+          loadTrack(song, true)
+          return
+        }
+        queue = [song]
+      }
+
+      const { isShuffle } = get()
+      const source = [...queue]
+      if (isShuffle && source.length > 1) {
+        set({ originalQueue: source, queue: buildShuffledOrder(source, song), currentIndex: 0, isGlobalShuffle: false })
+      } else {
+        set({ originalQueue: source, queue: source, currentIndex: Math.max(0, source.findIndex(s => s.id === song.id)), isGlobalShuffle: false })
+      }
+      loadTrack(song, true)
+    },
+
+    togglePlay: () => {
+      const a = getAudio()
+      if (!a || !get().currentSong) return
+      if (a.paused) {
+        a.play().catch(handlePlayError)
+      } else {
+        a.pause()
+      }
+    },
+
+    setVolume: (volume) => {
+      const a = getAudio()
+      if (a) a.volume = Math.min(1, Math.max(0, volume / 100))
+      set({ volume })
+    },
+
+    seekTo: (position) => {
+      const a = getAudio()
+      if (!a || !isFinite(position)) return
+      a.currentTime = position
+      const dur = get().duration
+      set({ currentTime: position, progress: dur > 0 ? (position / dur) * 100 : 0 })
+    },
+
+    nextSong: () => advance(false),
+
+    previousSong: () => {
+      const { queue, currentIndex, currentTime, repeatMode } = get()
+      if (queue.length === 0) return
+
+      // Passou de 3s: volta para o início da música atual (como o Spotify)
+      if (currentTime > 3) {
+        get().seekTo(0)
+        return
+      }
+
+      if (currentIndex > 0) {
+        playIndex(currentIndex - 1)
+      } else if (repeatMode === 'all' && queue.length > 1) {
+        playIndex(queue.length - 1)
+      } else {
+        get().seekTo(0)
+      }
+    },
+
+    toggleShuffle: () => {
+      const { isShuffle, originalQueue, queue, currentSong } = get()
+      const source = originalQueue.length ? originalQueue : queue
+
+      if (!isShuffle) {
+        // Liga: música atual vai para a frente e o resto é embaralhado
+        set({
+          isShuffle: true,
+          queue: buildShuffledOrder(source, currentSong),
+          currentIndex: 0
+        })
+      } else {
+        // Desliga: volta para a ordem original, continuando da música atual
+        const idx = source.findIndex(s => s.id === currentSong?.id)
+        set({
+          isShuffle: false,
+          isGlobalShuffle: false,
+          queue: [...source],
+          currentIndex: idx >= 0 ? idx : 0
+        })
+      }
+    },
+
+    // off -> all (repete a fila) -> one (repete a faixa) -> off
+    toggleRepeat: () => {
+      const order: RepeatMode[] = ['off', 'all', 'one']
+      const next = order[(order.indexOf(get().repeatMode) + 1) % order.length]
+      set({ repeatMode: next })
+    },
+
+    // "Rádio": toca a biblioteca inteira no aleatório (ou desliga o aleatório)
+    toggleGlobalShuffle: async () => {
+      if (get().isGlobalShuffle) {
+        get().toggleShuffle() // desliga o shuffle e restaura a ordem original
+        set({ isGlobalShuffle: false })
+        return
+      }
+      await get().playAllShuffled()
+    },
+
+    playAllShuffled: async (songs) => {
+      if (loadingLibrary) return
+      let library = songs
+
+      if (!library || library.length === 0) {
+        loadingLibrary = true
+        set({ isLoading: true, error: null })
+        try {
+          const { musicService } = await import('@/services/musicService')
+          library = await musicService.getAll()
+        } catch (e) {
+          console.error('Erro ao carregar músicas:', e)
+          set({ isLoading: false, error: 'Não foi possível carregar a biblioteca de músicas.' })
+          return
+        } finally {
+          loadingLibrary = false
+        }
+      }
+
+      if (!library || library.length === 0) {
+        set({ isLoading: false, error: 'Nenhuma música encontrada.' })
+        return
+      }
+
+      errorStreak = 0
+      const first = library[Math.floor(Math.random() * library.length)]
+      set({
+        originalQueue: [...library],
+        queue: buildShuffledOrder(library, first),
+        currentIndex: 0,
+        isShuffle: true,
+        repeatMode: 'all', // a rádio nunca deve acabar
+        isGlobalShuffle: true
+      })
+      loadTrack(first, true)
     }
   }
-}))
+})
